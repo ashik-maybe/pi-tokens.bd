@@ -120,6 +120,8 @@ async function fetchModels(apiKey: string, signal?: AbortSignal): Promise<TokenM
 export default function (pi: ExtensionAPI) {
   let lastUsage: UsageResponse | null = null;
   let refreshTimer: ReturnType<typeof setInterval> | null = null;
+  let warnedWindows = false;
+  let warnedWallet = false;
 
   const updateStatus = (ctx: any) => {
     if (!lastUsage) {
@@ -131,19 +133,38 @@ export default function (pi: ExtensionAPI) {
     ctx.ui.setStatus("tokens", `tokens.bd: $${wallet.toFixed(2)} | ${pct}% used`);
   };
 
+  const checkWarnings = (ctx: any) => {
+    if (!lastUsage) return;
+    const highWindow = (lastUsage.windows ?? []).find((w) => w.percentUsed >= 90);
+    if (highWindow && !warnedWindows) {
+      warnedWindows = true;
+      ctx.ui.notify(
+        `${highWindow.label} at ${highWindow.percentUsed}%. Resets ${highWindow.resetsAt}.`,
+        "warning",
+      );
+    }
+    if (!highWindow) warnedWindows = false;
+
+    const wallet = lastUsage.wallet?.balanceUsd ?? 0;
+    if (wallet < 1 && !warnedWallet) {
+      warnedWallet = true;
+      ctx.ui.notify(`Low balance ($${wallet.toFixed(2)}). Top up at tokens.bd/dashboard/billing`, "warning");
+    }
+    if (wallet >= 1) warnedWallet = false;
+  };
+
   const refreshUsage = async (ctx: any) => {
     const apiKey = resolveApiKey();
     if (!apiKey) return;
     lastUsage = await fetchUsage(apiKey);
     updateStatus(ctx);
+    checkWarnings(ctx);
   };
 
-  // Register provider with native auth + dynamic catalog
   pi.registerProvider("tokens", {
     name: "Tokens.bd",
     baseUrl: BASE_URL,
     api: "openai-completions",
-    // No apiKey - Pi prompts via /login
     models: [],
     oauth: {
       name: "Tokens.bd API Key",
