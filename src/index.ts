@@ -30,7 +30,7 @@ interface UsageResponse {
 }
 
 const ERROR_MAP: Record<string, string> = {
-  missing_api_key: "No API key. Run /login tokens.",
+  missing_api_key: "No API key. Run /login tokens.bd.",
   invalid_api_key: "Invalid API key. Recopy or create a new one.",
   key_inactive: "Key revoked or rotated. Use the current secret.",
   key_expired: "Key expired. Create a new one.",
@@ -85,7 +85,7 @@ function resolveApiKey(): string | undefined {
     const home = process.env.HOME ?? "";
     const authPath = path.join(home, ".pi", "agent", "auth.json");
     const auth = JSON.parse(fs.readFileSync(authPath, "utf8"));
-    return auth?.tokens?.access ?? auth?.tokens?.key;
+    return auth?.["tokens.bd"]?.access ?? auth?.["tokens.bd"]?.key;
   } catch {
     return undefined;
   }
@@ -125,12 +125,12 @@ export default function (pi: ExtensionAPI) {
 
   const updateStatus = (ctx: any) => {
     if (!lastUsage) {
-      ctx.ui.setStatus("tokens", "tokens.bd: no data");
+      ctx.ui.setStatus("tokens.bd", "tokens.bd: no data");
       return;
     }
     const wallet = lastUsage.wallet?.balanceUsd ?? 0;
     const pct = lastUsage.windows?.length ? lastUsage.windows[0].percentUsed : 0;
-    ctx.ui.setStatus("tokens", `tokens.bd: $${wallet.toFixed(2)} | ${pct}% used`);
+    ctx.ui.setStatus("tokens.bd", `tokens.bd: $${wallet.toFixed(2)} | ${pct}% used`);
   };
 
   const checkWarnings = (ctx: any) => {
@@ -161,7 +161,7 @@ export default function (pi: ExtensionAPI) {
     checkWarnings(ctx);
   };
 
-  pi.registerProvider("tokens", {
+  pi.registerProvider("tokens.bd", {
     name: "Tokens.bd",
     baseUrl: BASE_URL,
     api: "openai-completions",
@@ -211,7 +211,7 @@ export default function (pi: ExtensionAPI) {
     handler: async (_args, ctx) => {
       const apiKey = resolveApiKey();
       if (!apiKey) {
-        ctx.ui.notify("Run /login tokens first.", "warning");
+        ctx.ui.notify("Run /login tokens.bd first.", "warning");
         return;
       }
       const usage = await fetchUsage(apiKey);
@@ -251,7 +251,7 @@ export default function (pi: ExtensionAPI) {
     handler: async (_args, ctx) => {
       const apiKey = resolveApiKey();
       if (!apiKey) {
-        ctx.ui.notify("Run /login tokens first.", "warning");
+        ctx.ui.notify("Run /login tokens.bd first.", "warning");
         return;
       }
       const models = await fetchModels(apiKey);

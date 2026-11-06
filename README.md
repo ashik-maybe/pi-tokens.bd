@@ -18,7 +18,7 @@ pi -e git:github.com/ashik-maybe/tokens.bd-adapter-for-pi.dev
 
 1. Create an API key at [tokens.bd/dashboard/keys](https://tokens.bd/dashboard/keys).
 2. Run `pi`.
-3. `/login tokens` — enter your `tok_live_...` key.
+3. `/login tokens.bd` — enter your `tok_live_...` key.
 4. `/model` → select a `tokens/` model.
 5. `Ctrl+S` to save as default.
 
