@@ -2,6 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const BASE_URL = "https://tokens.bd/v1";
 const USAGE_URL = "https://tokens.bd/v1/tokens/usage";
+const MODELS_URL = "https://tokens.bd/v1/models";
 
 interface TokenModel {
   id: string;
@@ -29,41 +30,47 @@ interface UsageResponse {
 }
 
 const ERROR_MAP: Record<string, string> = {
-  missing_api_key: "No API key. Run /login tokens.",
-  invalid_api_key: "Invalid API key. Check or recreate it.",
+  missing_api_key: "No API key. Run /login tokens or set TOKENS_API_KEY.",
+  invalid_api_key: "Invalid API key. Recopy or create a new one.",
   key_inactive: "Key revoked or rotated. Use the current secret.",
   key_expired: "Key expired. Create a new one.",
   account_suspended: "Account suspended. Contact support.",
-  model_not_allowed_on_key: "Model not in this key's allow-list.",
-  monthly_spend_cap_exceeded: "Monthly spend cap reached. Wait or use another key.",
-  tier_permission_denied: "Plan does not include this model. Upgrade or top up wallet.",
-  model_not_found: "Model not found. Check GET /v1/models.",
+  model_not_allowed_on_key: "Model not in this key's allow-list. Use an allowed model.",
+  monthly_spend_cap_exceeded: "Monthly spend cap reached. Wait for next month or use another key.",
+  tier_permission_denied: "Plan doesn't include this model. Upgrade or top up wallet.",
+  model_not_found: "Model not found. Check /v1/models.",
   insufficient_credits: "Insufficient credits. Top up or lower max_tokens.",
   no_funding: "No active plan and no wallet balance. Subscribe or top up.",
   outstanding_debt: "Negative balance. Top up to clear it.",
   member_cap_reached: "Team member cap reached. Ask admin.",
-  rate_limited: "Rate limited. Wait Retry-After seconds.",
-  concurrency_limit: "Too many requests in flight. Reduce parallelism.",
-  window_exhausted: "Usage window exhausted. Wait for reset.",
-  model_limit_reached: "Model allowance used up. Switch models or wait.",
+  rate_limited: "Rate limited (RPM). Wait Retry-After seconds.",
+  concurrency_limit: "Too many requests in flight. Reduce parallelism. Retry-After: 2s.",
+  window_exhausted: "Usage window exhausted. Wait for reset (can be hours).",
+  model_limit_reached: "Model allowance used up. Switch models or wait for reset.",
   rate_limit_exceeded: "Upstream rate limited. Retry with backoff.",
-  upstream_unreachable: "Upstream unreachable. Retry later.",
-  upstream_timeout: "Upstream timed out. Retry or reduce request size.",
-  no_upstream_available: "No upstream for this model. Try another.",
+  upstream_unreachable: "Upstream unreachable. Retry with backoff.",
+  upstream_timeout: "Upstream timed out (600s). Retry or reduce request size.",
+  no_upstream_available: "No upstream for this model. Try another model.",
   model_not_priced: "Model not priced. Try another model.",
   request_entity_too_large: "Request too large (>10MB). Trim context.",
+  invalid_request: "Invalid request. Check model field and Content-Type.",
+  model_not_available: "Model can't be served right now. Pick another.",
+  endpoint_not_supported_for_model: "Endpoint not supported for this model. Use /v1/chat/completions.",
+  upstream_auth_error: "Upstream auth failed (not your key). Retry later or switch model.",
+  anthropic_protocol_disabled: "Messages API disabled. Use Chat Completions.",
 };
 
 export default function (pi: ExtensionAPI) {
-  let lastUsage: UsageResponse | null = null;
+  let lastUsage: any = null;
+  let refreshTimer: ReturnType<typeof setInterval> | null = null;
 
-  const fetchUsage = async (apiKey: string): Promise<UsageResponse | null> => {
+  const fetchUsage = async (apiKey: string): Promise<any> => {
     try {
       const res = await fetch(USAGE_URL, {
         headers: { Authorization: `Bearer ${apiKey}` },
       });
       if (!res.ok) return null;
-      return (await res.json()) as UsageResponse;
+      return await res.json();
     } catch {
       return null;
     }
@@ -71,7 +78,7 @@ export default function (pi: ExtensionAPI) {
 
   const fetchModels = async (apiKey: string): Promise<string[]> => {
     try {
-      const res = await fetch(`${BASE_URL}/models`, {
+      const res = await fetch(MODELS_URL, {
         headers: { Authorization: `Bearer ${apiKey}` },
       });
       if (!res.ok) return [];
@@ -88,9 +95,7 @@ export default function (pi: ExtensionAPI) {
       return;
     }
     const wallet = lastUsage.wallet?.balanceUsd ?? 0;
-    const pct = lastUsage.windows.length
-      ? lastUsage.windows[0].percentUsed
-      : 0;
+    const pct = lastUsage.windows?.length ? lastUsage.windows[0].percentUsed : 0;
     ctx.ui.setStatus("tokens", `tokens.bd: $${wallet.toFixed(2)} | ${pct}% used`);
   };
 
@@ -99,37 +104,40 @@ export default function (pi: ExtensionAPI) {
     updateStatus(ctx);
   };
 
-  // Register provider
+  const registerProviderModels = (models: string[]) => {
+    try {
+      (pi as any).registerProvider?.("tokens", {
+        name: "Tokens.bd",
+        baseUrl: BASE_URL,
+        apiKey: "$TOKENS_API_KEY",
+        api: "openai-completions",
+        models: models.map((id) => ({
+          id,
+          name: id,
+          input: ["text", "image"],
+        })),
+      });
+    } catch {}
+  };
+
+  // Register provider on load
   pi.registerProvider("tokens", {
     name: "Tokens.bd",
     baseUrl: BASE_URL,
     apiKey: "$TOKENS_API_KEY",
     api: "openai-completions",
     models: [],
-    // Dynamic catalog populated via refreshModels below
   } as any);
-
-  // Auth: env var or auth.json key
-  // Pi resolves $TOKENS_API_KEY from environment automatically.
 
   pi.on("session_start", async (_e, ctx) => {
     const apiKey = process.env.TOKENS_API_KEY;
     if (apiKey) {
       const models = await fetchModels(apiKey);
-      // Update provider models dynamically
-      try {
-        (pi as any).registerProvider?.("tokens", {
-          name: "Tokens.bd",
-          baseUrl: BASE_URL,
-          apiKey: "$TOKENS_API_KEY",
-          api: "openai-completions",
-          models: models.map((id) => ({ id, name: id, input: ["text", "image"] })),
-        });
-      } catch {}
+      registerProviderModels(models);
       await refreshUsage(ctx, apiKey);
     }
-    // Refresh usage every 60s
-    setInterval(async () => {
+    if (refreshTimer) clearInterval(refreshTimer);
+    refreshTimer = setInterval(async () => {
       const key = process.env.TOKENS_API_KEY;
       if (key) await refreshUsage(ctx, key);
     }, 60000);
@@ -140,7 +148,7 @@ export default function (pi: ExtensionAPI) {
     handler: async (_args, ctx) => {
       const apiKey = process.env.TOKENS_API_KEY;
       if (!apiKey) {
-        ctx.ui.notify("Set TOKENS_API_KEY first.", "warning");
+        ctx.ui.notify("Set TOKENS_API_KEY or run /login tokens.", "warning");
         return;
       }
       const usage = await fetchUsage(apiKey);
@@ -156,23 +164,39 @@ export default function (pi: ExtensionAPI) {
       } else {
         lines.push("Plan: pay-as-you-go");
       }
-      for (const w of usage.windows) {
+      for (const w of usage.windows ?? []) {
         lines.push(`${w.label}: ${w.used}/${w.limit} ${w.unit} (${w.percentUsed}%) resets ${w.resetsAt}`);
       }
       if (usage.wallet) lines.push(`Wallet: $${usage.wallet.balanceUsd.toFixed(2)}`);
-      if (usage.key.monthlySpendCapUsd) lines.push(`Key cap: $${usage.key.monthlySpendCapUsd}/mo`);
-      if (usage.key.allowedModels) lines.push(`Allowed: ${usage.key.allowedModels.join(", ")}`);
+      if (usage.key?.monthlySpendCapUsd) lines.push(`Key cap: $${usage.key.monthlySpendCapUsd}/mo`);
+      if (usage.key?.allowedModels) lines.push(`Allowed: ${usage.key.allowedModels.join(", ")}`);
       ctx.ui.notify(lines.join("\n"), "info");
+      updateStatus(ctx);
     },
   });
 
-  // Error mapping via tool_result? Pi handles HTTP errors internally.
-  // We can't intercept HTTP errors easily, so provide a helper command.
   pi.registerCommand("tokens-errors", {
     description: "List tokens.bd error codes and fixes",
     handler: async (_args, ctx) => {
       const lines = Object.entries(ERROR_MAP).map(([code, msg]) => `${code}: ${msg}`);
       ctx.ui.notify(lines.join("\n"), "info");
+    },
+  });
+
+  pi.registerCommand("tokens-models", {
+    description: "List models available to your key",
+    handler: async (_args, ctx) => {
+      const apiKey = process.env.TOKENS_API_KEY;
+      if (!apiKey) {
+        ctx.ui.notify("Set TOKENS_API_KEY or run /login tokens.", "warning");
+        return;
+      }
+      const models = await fetchModels(apiKey);
+      if (models.length === 0) {
+        ctx.ui.notify("No models available. Check plan/wallet.", "warning");
+        return;
+      }
+      ctx.ui.notify(models.join("\n"), "info");
     },
   });
 }
