@@ -1,0 +1,13 @@
+{
+  "name": "tokens.bd-adapter-for-pi.dev",
+  "version": "0.1.0",
+  "description": "Pi provider extension for tokens.bd",
+  "type": "module",
+  "main": "src/index.ts",
+  "pi": {
+    "extensions": ["src/index.ts"]
+  },
+  "keywords": ["pi", "pi-extension", "tokens.bd", "provider"],
+  "license": "MIT",
+  "dependencies": {}
+}
