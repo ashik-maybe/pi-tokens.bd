@@ -19,10 +19,11 @@ pi -e git:github.com/ashik-maybe/tokens.bd-adapter-for-pi.dev
 1. Create an API key at [tokens.bd/dashboard/keys](https://tokens.bd/dashboard/keys).
 2. Run `pi`.
 3. `/login tokens.bd` — enter your `tok_live_...` key.
-4. `/model` → select a `tokens/` model.
+4. `/model` → select a `tokens.bd/` model.
 5. `Ctrl+S` to save as default.
 
 The key is stored in `~/.pi/agent/auth.json`. No environment variable needed.
+Existing OAuth logins from earlier adapter versions keep working; new logins are stored as standard API-key credentials through Pi's native provider auth.
 
 ### Environment variable (alternative)
 
@@ -37,7 +38,7 @@ Pi resolves `$TOKENS_API_KEY` automatically. `/login` takes precedence if both a
 
 ### models.json (alternative)
 
-If you prefer config over the extension:
+If you prefer config over the extension (the extension registers provider `tokens.bd`):
 
 ```json
 {
@@ -61,7 +62,6 @@ Place in `~/.pi/agent/models.json`. The extension is not needed in this case.
 | Command | Description |
 |---|---|
 | `/tokens-status` | Show plan, usage windows, wallet balance, key limits |
-| `/tokens-models` | List models available to your key |
 | `/tokens-costs` | Show loaded per-model pricing from tokens-costs.json |
 | `/tokens-compare` | Compare available models by cost |
 | `/tokens-suggest` | Suggest cheapest model for routine work |
@@ -70,10 +70,10 @@ Place in `~/.pi/agent/models.json`. The extension is not needed in this case.
 
 ## Capabilities
 
-- **Text + image input** on all models (Pi handles errors if a model doesn't support images).
+- **Text input** default (`input: ["text"]`). Vision/tools vary by model; catalog pages list support, `/v1/models` does not yet expose it.
 - **Tool calling** via Pi's built-in OpenAI-compatible handler.
 - **Streaming** via Pi's built-in SSE handler.
-- **Reasoning** via `reasoning_effort` (passed through to the provider).
+- **Reasoning** via `reasoning_effort` only on models flagged reasoning in future catalog. Defaults off until `/v1/models` exposes capability.
 - **Structured output** via `response_format` (passed through to the provider).
 
 ## Footer widget
@@ -86,15 +86,19 @@ tokens.bd: $12.50 | 26% used
 
 Proactive warnings fire when a usage window hits 90% or wallet drops below $1.
 
-## Virtual model router
+## Ladder virtual models
 
-The extension registers `tokens.bd/auto` as a virtual model. Select with `/model`. Routes `low` to cheapest model, `high` to most expensive. Sticky routing for tool follow-ups.
+Ladder order lives in `ladder.json`. Pricing stays in `costs.json`.
 
-Configure via env vars:
-- `PI_ROUTER_LOW` — model id for routine work
-- `PI_ROUTER_HIGH` — model id for hard tasks
+Extension registers `tokens.bd/fast`, `coder`, `reasoner`, `long-context`, `private`, `research`, plus `auto` as alias to `fast`. Select with `/model`. First physical model in each role list wins. Retry escalates one step down that list.
 
-If unset, picks from `costs.json` automatically.
+Retry only escalates retryable quota/5xx errors (`rate_limited`, `rate_limit_exceeded`, `upstream_*`, `model_limit_reached`, context overflow). Auth, billing, spend-cap, and input errors fail fast so a bad key, empty wallet, or malformed request does not burn usage on the rest of the ladder.
+
+Bundled `ladder.json` and `costs.json` ship with the package — no copying needed. Copy `ladder.json` to `~/.pi/agent/tokens-ladder.json` to override. Override one role by env:
+
+```bash
+export TOKENS_CODER="id1,id2"
+```
 
 ## Scoped models (cost efficiency)
 
@@ -110,7 +114,7 @@ Use `/tokens-plan <goal>` for cost-aware task planning.
 
 ## Usage history
 
-Usage logged to `~/.pi/agent/tokens-usage-history.json` every 60s. Run `/tokens-history` for 7-day trend.
+Usage logged as `tokens-usage` entries in the session branch every 60s. Run `/tokens-history` for session trend. Set `TOKENS_DAILY_BUDGET` to warn on daily spend.
 
 ## Update
 
@@ -168,9 +172,15 @@ Some models don't support vision or tool calling. The gateway returns a 400 or d
 
 ## Per-model costs (optional)
 
-Copy `costs.json` from the repo to `~/.pi/agent/tokens-costs.json` and fill in prices from [tokens.bd/models](https://tokens.bd/models). The adapter loads it on startup and shows per-model cost in Pi's footer and `/session`.
+Bundled `costs.json` ships with the package and is used automatically. Copy it to `~/.pi/agent/tokens-costs.json` only to override prices from [tokens.bd/models](https://tokens.bd/models). The adapter loads it on startup and shows per-model cost in Pi's footer and `/session`. Models without cache prices are billed at input price by the gateway; adapter mirrors that.
+
+Copy `ladder.json` from the repo to `~/.pi/agent/tokens-ladder.json` only to override role order.
 
 Update `costs.json` whenever prices change. The file includes a `_note` with the source URL and date.
+
+## Offline catalog
+
+Pi caches the discovered model list in its models store. After one successful fetch, `/model` keeps listing the snapshot offline (`pi --offline`). A failed refresh never wipes the cached catalog.
 
 ## Notes
 
