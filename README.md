@@ -63,6 +63,9 @@ Place in `~/.pi/agent/models.json`. The extension is not needed in this case.
 | `/tokens-status` | Show plan, usage windows, wallet balance, key limits |
 | `/tokens-models` | List models available to your key |
 | `/tokens-costs` | Show loaded per-model pricing from tokens-costs.json |
+| `/tokens-compare` | Compare available models by cost |
+| `/tokens-suggest` | Suggest cheapest model for routine work |
+| `/tokens-history` | Show 7-day usage history |
 | `/tokens-errors` | List all error codes and fixes |
 
 ## Capabilities
@@ -80,6 +83,34 @@ Shows wallet balance and percent used. Refreshes every 60 seconds.
 ```
 tokens.bd: $12.50 | 26% used
 ```
+
+Proactive warnings fire when a usage window hits 90% or wallet drops below $1.
+
+## Virtual model router
+
+The extension registers `tokens.bd/auto` as a virtual model. Select with `/model`. Routes `low` to cheapest model, `high` to most expensive. Sticky routing for tool follow-ups.
+
+Configure via env vars:
+- `PI_ROUTER_LOW` — model id for routine work
+- `PI_ROUTER_HIGH` — model id for hard tasks
+
+If unset, picks from `costs.json` automatically.
+
+## Scoped models (cost efficiency)
+
+Use `/scoped-models` to limit `Ctrl+P` cycling to cheap models. Scope to free models for routine work, switch manually for hard tasks.
+
+## Tokens skill
+
+Ships a `tokens-bd` skill. Pi loads it when cost/usage is relevant. Includes codemode recipes.
+
+## Tokens plan template
+
+Use `/tokens-plan <goal>` for cost-aware task planning.
+
+## Usage history
+
+Usage logged to `~/.pi/agent/tokens-usage-history.json` every 60s. Run `/tokens-history` for 7-day trend.
 
 ## Update
 
