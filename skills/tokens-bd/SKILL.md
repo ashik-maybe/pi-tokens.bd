@@ -14,10 +14,13 @@ Before starting a long or expensive task, run `/tokens-status` to check:
 
 ## Model selection
 
-- Use `/tokens-models` to see available models.
+- Use `/model` to see available models. `/tokens-models` was removed; Pi `/model` covers it.
 - Use `/tokens-compare` to sort by cost.
 - Use `/tokens-suggest` for the cheapest routine model.
-- Use `tokens.bd/auto` virtual model for automatic routing (set `PI_ROUTER_LOW` and `PI_ROUTER_HIGH`).
+- Use `tokens.bd/<role>` ladder virtual models for routing:
+  `fast`, `coder`, `reasoner`, `long-context`, `private`, `research`, and `auto` (alias to fast).
+- Ladder order lives in `ladder.json`; pricing stays in `costs.json`.
+- Env override per role: `TOKENS_FAST=m1,m2`, `TOKENS_CODER=m1,m2`. Copy `ladder.json` to `~/.pi/agent/tokens-ladder.json` to override.
 
 ## Error handling
 
@@ -29,22 +32,6 @@ Before starting a long or expensive task, run `/tokens-status` to check:
 
 Run `/tokens-errors` for the full reference.
 
-## Codemode recipe
-
-Compose multiple tokens.bd API calls in one script:
-
-```js
-const models = await fetch("https://tokens.bd/v1/models", {
-  headers: { Authorization: "Bearer " + (await getApiKey()) }
-}).then(r => r.json());
-
-const usage = await fetch("https://tokens.bd/v1/tokens/usage", {
-  headers: { Authorization: "Bearer " + (await getApiKey()) }
-}).then(r => r.json());
-
-return { models: models.data.length, wallet: usage.wallet?.balanceUsd, windows: usage.windows };
-```
-
 ## Cost awareness
 
 - Set `max_tokens` close to what you need (large values reserve more).
@@ -52,3 +39,4 @@ return { models: models.data.length, wallet: usage.wallet?.balanceUsd, windows: 
 - Use `/compact` after each phase to reduce context.
 - Check `/tokens-history` for spending trends.
 - Update `~/.pi/agent/tokens-costs.json` when prices change.
+- Keep global config stable for prompt cache reuse.
