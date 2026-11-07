@@ -44,17 +44,17 @@ const ERROR_MAP: Record<string, string> = {
   key_expired: "Key expired. Create a new one.",
   account_suspended: "Account suspended. Contact support.",
   model_not_allowed_on_key: "Model not in this key's allow-list.",
-  monthly_spend_cap_exceeded: "Monthly spend cap reached. Wait for next month or use another key.",
-  tier_permission_denied: "Plan doesn't include this model. Upgrade or top up wallet.",
+  monthly_spend_cap_exceeded: "Monthly spend cap reached. Wait for next month or use another key. Try /tokens-suggest for a cheaper model.",
+  tier_permission_denied: "Plan doesn't include this model. Upgrade or top up wallet. Try /tokens-suggest for a cheaper model.",
   model_not_found: "Model not found. Check /v1/models.",
-  insufficient_credits: "Insufficient credits. Top up or lower max_tokens.",
-  no_funding: "No active plan and no wallet balance. Subscribe or top up.",
+  insufficient_credits: "Insufficient credits. Top up or lower max_tokens. Try /tokens-suggest for a cheaper model.",
+  no_funding: "No active plan and no wallet balance. Subscribe or top up. Try /tokens-suggest for a cheaper model.",
   outstanding_debt: "Negative balance. Top up to clear it.",
   member_cap_reached: "Team member cap reached. Ask admin.",
   rate_limited: "Rate limited (RPM). Wait Retry-After seconds.",
   concurrency_limit: "Too many in flight. Reduce parallelism. Retry-After: 2s.",
-  window_exhausted: "Usage window exhausted. Wait for reset (can be hours).",
-  model_limit_reached: "Model allowance used up. Switch models or wait.",
+  window_exhausted: "Usage window exhausted. Wait for reset (can be hours). Try /tokens-suggest for a cheaper model.",
+  model_limit_reached: "Model allowance used up. Switch models or wait. Try /tokens-suggest for a cheaper model.",
   rate_limit_exceeded: "Upstream rate limited. Retry with backoff.",
   upstream_unreachable: "Upstream unreachable. Retry with backoff.",
   upstream_timeout: "Upstream timed out (600s). Retry or reduce request size.",
@@ -139,26 +139,13 @@ async function fetchModels(apiKey: string, signal?: AbortSignal): Promise<any[]>
   }
 }
 
-function saveUsageHistory(usage: any) {
-  try {
-    const fs = require("node:fs");
-    const path = require("node:path");
-    const home = process.env.HOME ?? "";
-    const histPath = path.join(home, ".pi", "agent", "tokens-usage-history.json");
-    let history: any[] = [];
-    if (fs.existsSync(histPath)) {
-      history = JSON.parse(fs.readFileSync(histPath, "utf8"));
-    }
-    const entry = {
-      date: new Date().toISOString(),
-      wallet: usage.wallet?.balanceUsd ?? 0,
-      windows: (usage.windows ?? []).map((w: any) => ({ type: w.type, used: w.used, limit: w.limit, percentUsed: w.percentUsed })),
-    };
-    history.push(entry);
-    const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
-    history = history.filter((h: any) => new Date(h.date).getTime() > cutoff);
-    fs.writeFileSync(histPath, JSON.stringify(history, null, 2));
-  } catch {}
+function appendUsageHistory(pi: any, usage: any) {
+  const entry = {
+    date: new Date().toISOString(),
+    wallet: usage.wallet?.balanceUsd ?? 0,
+    windows: (usage.windows ?? []).map((w: any) => ({ type: w.type, used: w.used, limit: w.limit, percentUsed: w.percentUsed })),
+  };
+  pi.appendEntry("tokens-usage", entry);
 }
 
 export default function (pi: ExtensionAPI) {
@@ -166,6 +153,7 @@ export default function (pi: ExtensionAPI) {
   let refreshTimer: ReturnType<typeof setInterval> | null = null;
   let warnedWindows = false;
   let warnedWallet = false;
+  let warnedBudget = false;
 
   const updateStatus = (ctx: any) => {
     if (!lastUsage) {
@@ -191,13 +179,35 @@ export default function (pi: ExtensionAPI) {
       ctx.ui.notify(`Low balance ($${wallet.toFixed(2)}). Top up at tokens.bd/dashboard/billing`, "warning");
     }
     if (wallet >= 1) warnedWallet = false;
+
+    const budget = Number(process.env.TOKENS_DAILY_BUDGET) || 0;
+    if (budget > 0 && !warnedBudget) {
+      const today = new Date().toISOString().slice(0, 10);
+      const spend = (lastUsage.windows ?? []).reduce((s: number, w: any) => s + (w.used ?? 0), 0);
+      if (spend >= budget) {
+        warnedBudget = true;
+        ctx.ui.notify(`Daily spend $${spend.toFixed(2)} reached budget $${budget}.`, "warning");
+      }
+    }
+    if (warnedBudget) {
+      const spend = (lastUsage.windows ?? []).reduce((s: number, w: any) => s + (w.used ?? 0), 0);
+      if (spend < budget * 0.9) warnedBudget = false;
+    }
   };
 
   const refreshUsage = async (ctx: any) => {
     const apiKey = resolveApiKey();
     if (!apiKey) return;
     lastUsage = await fetchUsage(apiKey);
-    if (lastUsage) saveUsageHistory(lastUsage);
+    if (lastUsage) {
+      appendUsageHistory(pi, lastUsage);
+      pi.events.emit("tokens:usage-updated", {
+        wallet: lastUsage.wallet?.balanceUsd ?? 0,
+        percentUsed: lastUsage.windows?.[0]?.percentUsed ?? 0,
+        plan: lastUsage.plan,
+        windows: lastUsage.windows,
+      });
+    }
     updateStatus(ctx);
     checkWarnings(ctx);
   };
@@ -231,6 +241,7 @@ export default function (pi: ExtensionAPI) {
             : { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
           contextWindow: c?.contextWindow ?? 128000,
           maxTokens: 8192,
+          promptCache: { short: 300 },
         };
       });
       if (context?.publish) {
@@ -338,7 +349,13 @@ export default function (pi: ExtensionAPI) {
         ctx.ui.notify("No models available. Check plan/wallet.", "warning");
         return;
       }
-      ctx.ui.notify(models.map((m: any) => m.id).join("\n"), "info");
+      const costs = loadCosts();
+      const lines = models.map((m: any) => {
+        const c = costs[m.id];
+        if (c) return `${m.id} (ctx=${(c.contextWindow / 1000).toFixed(0)}K, in=$${c.input}/M, out=$${c.output}/M)`;
+        return `${m.id} (no cost data)`;
+      });
+      ctx.ui.notify(lines.join("\n"), "info");
     },
   });
 
@@ -361,25 +378,18 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("tokens-history", {
     description: "Show 7-day usage history",
     handler: async (_args: any, ctx: any) => {
-      try {
-        const fs = require("node:fs");
-        const path = require("node:path");
-        const home = process.env.HOME ?? "";
-        const histPath = path.join(home, ".pi", "agent", "tokens-usage-history.json");
-        if (!fs.existsSync(histPath)) {
-          ctx.ui.notify("No usage history yet.", "info");
-          return;
-        }
-        const history = JSON.parse(fs.readFileSync(histPath, "utf8"));
-        const lines = history.slice(-7).map((h: any) => {
-          const d = new Date(h.date).toLocaleDateString();
-          const w = h.windows?.[0];
-          return `${d}: $${h.wallet?.toFixed(2) ?? "?"} | ${w ? `${w.percentUsed}%` : "n/a"}`;
-        });
-        ctx.ui.notify(lines.join("\n"), "info");
-      } catch (e: any) {
-        ctx.ui.notify(`History read failed: ${e?.message}`, "error");
+      const branch = ctx.sessionManager.getBranch();
+      const entries = branch.filter((e: any) => e.type === "custom" && e.customType === "tokens-usage");
+      if (entries.length === 0) {
+        ctx.ui.notify("No usage history in this session yet.", "info");
+        return;
       }
+      const lines = entries.slice(-7).map((e: any) => {
+        const d = new Date(e.data.date).toLocaleDateString();
+        const w = e.data.windows?.[0];
+        return `${d}: $${e.data.wallet?.toFixed(2) ?? "?"} | ${w ? `${w.percentUsed}%` : "n/a"}`;
+      });
+      ctx.ui.notify(lines.join("\n"), "info");
     },
   });
 
