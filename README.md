@@ -62,6 +62,7 @@ Place in `~/.pi/agent/models.json`. The extension is not needed in this case.
 |---|---|
 | `/tokens-status` | Show plan, usage windows, wallet balance, key limits |
 | `/tokens-models` | List models available to your key |
+| `/tokens-costs` | Show loaded per-model pricing from tokens-costs.json |
 | `/tokens-errors` | List all error codes and fixes |
 
 ## Capabilities
@@ -133,6 +134,12 @@ See `docs/rate-limits` on tokens.bd for details. Run `/tokens-errors` for the fu
 ### Model ignores images or tools
 
 Some models don't support vision or tool calling. The gateway returns a 400 or drops the feature. Check the model's page on [tokens.bd/models](https://tokens.bd/models).
+
+## Per-model costs (optional)
+
+Copy `costs.json` from the repo to `~/.pi/agent/tokens-costs.json` and fill in prices from [tokens.bd/models](https://tokens.bd/models). The adapter loads it on startup and shows per-model cost in Pi's footer and `/session`.
+
+Update `costs.json` whenever prices change. The file includes a `_note` with the source URL and date.
 
 ## Notes
 

@@ -91,6 +91,28 @@ function resolveApiKey(): string | undefined {
   }
 }
 
+interface CostEntry {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  contextWindow: number;
+}
+
+function loadCosts(): Record<string, CostEntry> {
+  try {
+    const fs = require("node:fs");
+    const path = require("node:path");
+    const home = process.env.HOME ?? "";
+    const costsPath = path.join(home, ".pi", "agent", "tokens-costs.json");
+    if (!fs.existsSync(costsPath)) return {};
+    const data = JSON.parse(fs.readFileSync(costsPath, "utf8"));
+    return data?.models ?? {};
+  } catch {
+    return {};
+  }
+}
+
 async function fetchUsage(apiKey: string): Promise<UsageResponse | null> {
   try {
     const res = await fetch(USAGE_URL, {
@@ -176,15 +198,21 @@ export default function (pi: ExtensionAPI) {
       const apiKey = resolveApiKey();
       if (!apiKey) return;
       const models = await fetchModels(apiKey, context?.signal);
-      const mapped = models.map((m) => ({
-        id: m.id,
-        name: m.id,
-        reasoning: false,
-        input: ["text", "image"] as ("text" | "image")[],
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-        contextWindow: 128000,
-        maxTokens: 8192,
-      }));
+      const costs = loadCosts();
+      const mapped = models.map((m) => {
+        const c = costs[m.id];
+        return {
+          id: m.id,
+          name: m.id,
+          reasoning: false,
+          input: ["text", "image"] as ("text" | "image")[],
+          cost: c
+            ? { input: c.input, output: c.output, cacheRead: c.cacheRead, cacheWrite: c.cacheWrite }
+            : { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+          contextWindow: c?.contextWindow ?? 128000,
+          maxTokens: 8192,
+        };
+      });
       if (context?.publish) {
         context.publish({ update: mapped });
       }
@@ -260,6 +288,22 @@ export default function (pi: ExtensionAPI) {
         return;
       }
       ctx.ui.notify(models.join("\n"), "info");
+    },
+  });
+
+  pi.registerCommand("tokens-costs", {
+    description: "Show loaded per-model costs from tokens-costs.json",
+    handler: async (_args, ctx) => {
+      const costs = loadCosts();
+      const entries = Object.entries(costs);
+      if (entries.length === 0) {
+        ctx.ui.notify("No costs loaded. Copy costs.json to ~/.pi/agent/tokens-costs.json", "warning");
+        return;
+      }
+      const lines = entries.map(([id, c]) =>
+        `${id}: in=$${c.input}/M out=$${c.output}/M ctx=${c.contextWindow}`
+      );
+      ctx.ui.notify(lines.join("\n"), "info");
     },
   });
 }
