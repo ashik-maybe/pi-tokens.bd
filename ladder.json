@@ -1,0 +1,11 @@
+{
+  "_note": "Cheap-first escalation ladder. Costs stay in costs.json. Each role lists model ids in prefer order. First physical model in registry wins. Env PREFIX_<ROLE> (e.g. TOKENS_FAST) overrides whole list, comma-separated. Place at ~/.pi/agent/tokens-ladder.json to override.",
+  "roles": {
+    "fast": ["z-ai/glm-5.3-flash", "xiaomi/mimo-v2.6-flash", "claude-haiku-5-5", "deepseek/deepseek-v4.1-flash"],
+    "coder": ["deepseek/deepseek-v4-pro-latest", "moonshotai/kimi-k2.7-code", "qwen/qwen-3.8-flash", "anthropic/claude-sonnet-5.5"],
+    "reasoner": ["anthropic/claude-opus-5-5", "moonshotai/kimi-k3.1-pro", "openai/gpt-5.6-sol", "x-ai/grok-4.6"],
+    "long-context": ["anthropic/claude-opus-5-5", "openai/gpt-6-luna", "moonshotai/kimi-k3", "qwen/qwen-3.8-omni-flash"],
+    "private": ["deepseek/deepseek-v4.1-flash", "meta/muse-spark-1.3-contributor", "qwen/qwen-3.8-flash"],
+    "research": ["anthropic/claude-sonnet-5.5", "google/gemini-3.8-flash", "openai/gpt-5.6-luna", "deepseek/deepseek-v4-pro-latest"]
+  }
+}
