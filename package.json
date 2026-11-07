@@ -5,7 +5,9 @@
   "type": "module",
   "main": "src/index.ts",
   "pi": {
-    "extensions": ["src/index.ts"]
+    "extensions": ["src/index.ts"],
+    "skills": ["./skills"],
+    "prompts": ["./prompts/*.md"]
   },
   "keywords": ["pi", "pi-extension", "tokens.bd", "provider"],
   "license": "MIT",
