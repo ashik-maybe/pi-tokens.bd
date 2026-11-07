@@ -29,6 +29,14 @@ interface UsageResponse {
   key: { monthlySpendCapUsd: number | null; allowedModels: string[] | null };
 }
 
+interface CostEntry {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  contextWindow: number;
+}
+
 const ERROR_MAP: Record<string, string> = {
   missing_api_key: "No API key. Run /login tokens.bd.",
   invalid_api_key: "Invalid API key. Recopy or create a new one.",
@@ -91,14 +99,6 @@ function resolveApiKey(): string | undefined {
   }
 }
 
-interface CostEntry {
-  input: number;
-  output: number;
-  cacheRead: number;
-  cacheWrite: number;
-  contextWindow: number;
-}
-
 function loadCosts(): Record<string, CostEntry> {
   try {
     const fs = require("node:fs");
@@ -113,34 +113,56 @@ function loadCosts(): Record<string, CostEntry> {
   }
 }
 
-async function fetchUsage(apiKey: string): Promise<UsageResponse | null> {
+async function fetchUsage(apiKey: string): Promise<any> {
   try {
     const res = await fetch(USAGE_URL, {
       headers: { Authorization: `Bearer ${apiKey}` },
     });
     if (!res.ok) return null;
-    return (await res.json()) as UsageResponse;
+    return await res.json();
   } catch {
     return null;
   }
 }
 
-async function fetchModels(apiKey: string, signal?: AbortSignal): Promise<TokenModel[]> {
+async function fetchModels(apiKey: string, signal?: AbortSignal): Promise<any[]> {
   try {
     const res = await fetch(MODELS_URL, {
       headers: { Authorization: `Bearer ${apiKey}` },
       signal,
     });
     if (!res.ok) return [];
-    const data = (await res.json()) as { data?: TokenModel[] };
+    const data = (await res.json()) as { data?: any[] };
     return data.data ?? [];
   } catch {
     return [];
   }
 }
 
+function saveUsageHistory(usage: any) {
+  try {
+    const fs = require("node:fs");
+    const path = require("node:path");
+    const home = process.env.HOME ?? "";
+    const histPath = path.join(home, ".pi", "agent", "tokens-usage-history.json");
+    let history: any[] = [];
+    if (fs.existsSync(histPath)) {
+      history = JSON.parse(fs.readFileSync(histPath, "utf8"));
+    }
+    const entry = {
+      date: new Date().toISOString(),
+      wallet: usage.wallet?.balanceUsd ?? 0,
+      windows: (usage.windows ?? []).map((w: any) => ({ type: w.type, used: w.used, limit: w.limit, percentUsed: w.percentUsed })),
+    };
+    history.push(entry);
+    const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    history = history.filter((h: any) => new Date(h.date).getTime() > cutoff);
+    fs.writeFileSync(histPath, JSON.stringify(history, null, 2));
+  } catch {}
+}
+
 export default function (pi: ExtensionAPI) {
-  let lastUsage: UsageResponse | null = null;
+  let lastUsage: any = null;
   let refreshTimer: ReturnType<typeof setInterval> | null = null;
   let warnedWindows = false;
   let warnedWallet = false;
@@ -157,16 +179,12 @@ export default function (pi: ExtensionAPI) {
 
   const checkWarnings = (ctx: any) => {
     if (!lastUsage) return;
-    const highWindow = (lastUsage.windows ?? []).find((w) => w.percentUsed >= 90);
+    const highWindow = (lastUsage.windows ?? []).find((w: any) => w.percentUsed >= 90);
     if (highWindow && !warnedWindows) {
       warnedWindows = true;
-      ctx.ui.notify(
-        `${highWindow.label} at ${highWindow.percentUsed}%. Resets ${highWindow.resetsAt}.`,
-        "warning",
-      );
+      ctx.ui.notify(`${highWindow.label} at ${highWindow.percentUsed}%. Resets ${highWindow.resetsAt}.`, "warning");
     }
     if (!highWindow) warnedWindows = false;
-
     const wallet = lastUsage.wallet?.balanceUsd ?? 0;
     if (wallet < 1 && !warnedWallet) {
       warnedWallet = true;
@@ -179,10 +197,12 @@ export default function (pi: ExtensionAPI) {
     const apiKey = resolveApiKey();
     if (!apiKey) return;
     lastUsage = await fetchUsage(apiKey);
+    if (lastUsage) saveUsageHistory(lastUsage);
     updateStatus(ctx);
     checkWarnings(ctx);
   };
 
+  // Register provider with native auth + dynamic catalog
   pi.registerProvider("tokens.bd", {
     name: "Tokens.bd",
     baseUrl: BASE_URL,
@@ -199,7 +219,7 @@ export default function (pi: ExtensionAPI) {
       if (!apiKey) return;
       const models = await fetchModels(apiKey, context?.signal);
       const costs = loadCosts();
-      const mapped = models.map((m) => {
+      const mapped = models.map((m: any) => {
         const c = costs[m.id];
         return {
           id: m.id,
@@ -219,7 +239,37 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  pi.on("session_start", async (_e, ctx) => {
+  // Virtual model router (generic, env-configured)
+  pi.registerVirtualModel({
+    provider: "tokens.bd",
+    id: "auto",
+    name: "Auto (cost router)",
+    thinkingLevels: ["low", "high"],
+    contextWindow: 200000,
+    maxTokens: 64000,
+    route(request: any, ctx: any) {
+      const sticky = request.failed ?? request.previous;
+      if (request.reason !== "user" && sticky) {
+        return { model: sticky.model, thinkingLevel: sticky.thinkingLevel ?? "medium" };
+      }
+      const costs = loadCosts();
+      const entries = Object.entries(costs);
+      let targetId: string | undefined;
+      if (request.thinkingLevel === "high") {
+        targetId = process.env.PI_ROUTER_HIGH || entries.sort((a: any, b: any) => b[1].output - a[1].output)[0]?.[0];
+      } else {
+        targetId = process.env.PI_ROUTER_LOW || entries.sort((a: any, b: any) => a[1].input - b[1].input)[0]?.[0];
+      }
+      if (targetId) {
+        const model = ctx.modelRegistry.find("tokens.bd", targetId);
+        if (model) return { model, thinkingLevel: "medium" };
+      }
+      if (ctx.model) return { model: ctx.model, thinkingLevel: "medium" };
+      throw new Error("No router target. Set PI_ROUTER_LOW/HIGH or add costs.json.");
+    },
+  });
+
+  pi.on("session_start", async (_e: any, ctx: any) => {
     await refreshUsage(ctx);
     if (refreshTimer) clearInterval(refreshTimer);
     refreshTimer = setInterval(async () => {
@@ -234,9 +284,10 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
+  // Commands
   pi.registerCommand("tokens-status", {
     description: "Show tokens.bd plan, usage, wallet, and key limits",
-    handler: async (_args, ctx) => {
+    handler: async (_args: any, ctx: any) => {
       const apiKey = resolveApiKey();
       if (!apiKey) {
         ctx.ui.notify("Run /login tokens.bd first.", "warning");
@@ -268,7 +319,7 @@ export default function (pi: ExtensionAPI) {
 
   pi.registerCommand("tokens-errors", {
     description: "List tokens.bd error codes and fixes",
-    handler: async (_args, ctx) => {
+    handler: async (_args: any, ctx: any) => {
       const lines = Object.entries(ERROR_MAP).map(([code, msg]) => `${code}: ${msg}`);
       ctx.ui.notify(lines.join("\n"), "info");
     },
@@ -276,7 +327,7 @@ export default function (pi: ExtensionAPI) {
 
   pi.registerCommand("tokens-models", {
     description: "List models available to your key",
-    handler: async (_args, ctx) => {
+    handler: async (_args: any, ctx: any) => {
       const apiKey = resolveApiKey();
       if (!apiKey) {
         ctx.ui.notify("Run /login tokens.bd first.", "warning");
@@ -287,13 +338,13 @@ export default function (pi: ExtensionAPI) {
         ctx.ui.notify("No models available. Check plan/wallet.", "warning");
         return;
       }
-      ctx.ui.notify(models.join("\n"), "info");
+      ctx.ui.notify(models.map((m: any) => m.id).join("\n"), "info");
     },
   });
 
   pi.registerCommand("tokens-costs", {
     description: "Show loaded per-model costs from tokens-costs.json",
-    handler: async (_args, ctx) => {
+    handler: async (_args: any, ctx: any) => {
       const costs = loadCosts();
       const entries = Object.entries(costs);
       if (entries.length === 0) {
@@ -304,6 +355,65 @@ export default function (pi: ExtensionAPI) {
         `${id}: in=$${c.input}/M out=$${c.output}/M ctx=${c.contextWindow}`
       );
       ctx.ui.notify(lines.join("\n"), "info");
+    },
+  });
+
+  pi.registerCommand("tokens-history", {
+    description: "Show 7-day usage history",
+    handler: async (_args: any, ctx: any) => {
+      try {
+        const fs = require("node:fs");
+        const path = require("node:path");
+        const home = process.env.HOME ?? "";
+        const histPath = path.join(home, ".pi", "agent", "tokens-usage-history.json");
+        if (!fs.existsSync(histPath)) {
+          ctx.ui.notify("No usage history yet.", "info");
+          return;
+        }
+        const history = JSON.parse(fs.readFileSync(histPath, "utf8"));
+        const lines = history.slice(-7).map((h: any) => {
+          const d = new Date(h.date).toLocaleDateString();
+          const w = h.windows?.[0];
+          return `${d}: $${h.wallet?.toFixed(2) ?? "?"} | ${w ? `${w.percentUsed}%` : "n/a"}`;
+        });
+        ctx.ui.notify(lines.join("\n"), "info");
+      } catch (e: any) {
+        ctx.ui.notify(`History read failed: ${e?.message}`, "error");
+      }
+    },
+  });
+
+  pi.registerCommand("tokens-compare", {
+    description: "Compare available models by cost",
+    handler: async (_args: any, ctx: any) => {
+      const apiKey = resolveApiKey();
+      if (!apiKey) {
+        ctx.ui.notify("Run /login tokens.bd first.", "warning");
+        return;
+      }
+      const models = await fetchModels(apiKey);
+      const costs = loadCosts();
+      const lines = models
+        .map((m: any) => {
+          const c = costs[m.id];
+          return c ? `${m.id}: in=$${c.input}/M out=$${c.output}/M ctx=${c.contextWindow}` : `${m.id}: (no cost data)`;
+        })
+        .sort();
+      ctx.ui.notify(lines.join("\n"), "info");
+    },
+  });
+
+  pi.registerCommand("tokens-suggest", {
+    description: "Suggest cheapest model for routine work",
+    handler: async (_args: any, ctx: any) => {
+      const costs = loadCosts();
+      const entries = Object.entries(costs);
+      if (entries.length === 0) {
+        ctx.ui.notify("No costs loaded. Copy costs.json to ~/.pi/agent/tokens-costs.json", "warning");
+        return;
+      }
+      const cheapest = entries.sort((a: any, b: any) => a[1].input - b[1].input)[0];
+      ctx.ui.notify(`Cheapest: ${cheapest[0]} ($${cheapest[1].input}/M in, $${cheapest[1].output}/M out)`, "info");
     },
   });
 }
