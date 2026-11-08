@@ -19,16 +19,15 @@ Install steps:
 
 Package layout:
 
-1. `ladder.json` holds ladder order. Ladder means an ordered model list per role. Role means `fast`, `coder`, `reasoner`, `long-context`, `private`, `research`.
-2. `costs.json` holds pricing. Costs show in the footer and `/session`.
-3. Both files ship inside the package. Bundled means inside the installed package. No copying needed.
-4. Override role order only by copying `ladder.json` to `~/.pi/agent/tokens-ladder.json`.
-5. Override prices only by copying `costs.json` to `~/.pi/agent/tokens-costs.json`.
+1. Pricing comes from `https://tokens.bd/api/models` at startup. `costs.json` is the offline fallback.
+2. Ladder order comes from the same live catalog. Ladder means an ordered model list per role. Role means `fast`, `coder`, `reasoner`, `long-context`, `research`. `private` is an alias of `fast`.
+3. Override role order only with an explicit `~/.pi/agent/tokens-ladder.json` file, or one role with `TOKENS_<ROLE>` env.
+4. Override prices only with Pi `models.json` cost entries, or `~/.pi/agent/tokens-costs.json`.
 
 Commands:
 
 1. `/tokens-status` shows plan, usage windows, wallet, key limits.
-2. `/tokens-costs` shows loaded per-model pricing.
+2. `/tokens-costs` shows loaded per-model pricing and its source.
 3. `/tokens-compare` compares available models by cost.
 4. `/tokens-suggest` suggests the cheapest model for routine work.
 5. `/tokens-history` shows 7-day usage history.
@@ -130,13 +129,13 @@ Warns at 90% window or <$1 wallet.
 
 ## Ladder
 
-Order: `ladder.json`. Price: `costs.json`.
+Order: derived from live catalog. Price: `https://tokens.bd/api/models`.
 
 Registers `tokens.bd/fast|coder|reasoner|long-context|private|research` + `auto` (= `fast`). `/model` to pick. First model in list wins. Retry steps down.
 
 Retry only quota/5xx (`rate_limited`, `rate_limit_exceeded`, `upstream_*`, `model_limit_reached`, context overflow). Auth/billing/spend-cap/input fail fast.
 
-Bundled files ship. Override: copy `ladder.json` → `~/.pi/agent/tokens-ladder.json`. One role by env:
+Algorithm derives roles at startup. Override: write `~/.pi/agent/tokens-ladder.json`. One role by env:
 
 ```bash
 export TOKENS_CODER="id1,id2"
@@ -203,7 +202,7 @@ Model lacks vision/tool support. Gateway 400s or drops feature. Check [tokens.bd
 
 ## Per-model costs (optional)
 
-Bundled `costs.json` auto-loads. Copy to `~/.pi/agent/tokens-costs.json` only to override from [tokens.bd/models](https://tokens.bd/models). Footer + `/session` show cost. No cache price → billed at input price; adapter mirrors. `ladder.json` → `~/.pi/agent/tokens-ladder.json` override only. Refresh `costs.json` on price change; `_note` holds source + date.
+Live prices load from `https://tokens.bd/api/models`. Bundled `costs.json` covers offline. Override via Pi `models.json` or `~/.pi/agent/tokens-costs.json` only. Footer + `/session` show cost. No cache price → billed at input price; adapter mirrors.
 
 ## Offline catalog
 

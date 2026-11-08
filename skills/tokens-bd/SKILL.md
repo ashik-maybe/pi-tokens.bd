@@ -19,8 +19,8 @@ Before starting a long or expensive task, run `/tokens-status` to check:
 - Use `/tokens-suggest` for the cheapest routine model.
 - Use `tokens.bd/<role>` ladder virtual models for routing:
   `fast`, `coder`, `reasoner`, `long-context`, `private`, `research`, and `auto` (alias to fast).
-- Ladder order lives in `ladder.json`; pricing stays in `costs.json`.
-- Env override per role: `TOKENS_FAST=m1,m2`, `TOKENS_CODER=m1,m2`. Copy `ladder.json` to `~/.pi/agent/tokens-ladder.json` to override.
+- Ladder order derives from the live catalog at startup; pricing comes from `https://tokens.bd/api/models` (`costs.json` is the offline fallback).
+- Env override per role: `TOKENS_FAST=m1,m2`, `TOKENS_CODER=m1,m2`. Write `~/.pi/agent/tokens-ladder.json` to override fully.
 
 ## Error handling
 
@@ -38,5 +38,5 @@ Run `/tokens-errors` for the full reference.
 - Prefer cheaper models for routine work (renames, formatting, simple edits).
 - Use `/compact` after each phase to reduce context.
 - Check `/tokens-history` for spending trends.
-- Update `~/.pi/agent/tokens-costs.json` when prices change.
+- Prices refresh automatically on startup. Edit `~/.pi/agent/tokens-costs.json` only to pin a price.
 - Keep global config stable for prompt cache reuse.

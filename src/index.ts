@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -13,6 +13,7 @@ import {
 
 const BASE_URL = "https://tokens.bd/v1";
 const MODELS_URL = "https://tokens.bd/v1/models";
+const CATALOG_URL = "https://tokens.bd/api/models";
 const USAGE_URL = "https://tokens.bd/v1/tokens/usage";
 const PROVIDER_ID = "tokens.bd";
 
@@ -24,9 +25,33 @@ interface CostEntry {
   contextWindow: number;
 }
 
+interface CatalogModel {
+  alias: string;
+  contextWindow: number;
+  input: number;
+  output: number;
+}
+
 type LadderMap = Record<string, string[]>;
 
+// Roles derived from live catalog. `private` is kept as a registered alias
+// to `fast` for existing user configs; it has no reliable catalogue signal.
 const ALL_ROLES = ["fast", "coder", "reasoner", "long-context", "private", "research"] as const;
+
+const ROLE_THINKING_LEVELS: Record<string, string[]> = {
+  fast: ["low", "medium"],
+  coder: ["low", "medium", "high"],
+  reasoner: ["high"],
+  "long-context": ["medium", "high"],
+  private: ["low", "medium"],
+  research: ["medium", "high"],
+};
+
+// Last live catalog + costs fetched during refreshModels. Used to derive
+// ladder roles dynamically at route time instead of from a file.
+let lastCatalog: CatalogModel[] = [];
+let lastCosts: Record<string, CostEntry> = {};
+let lastCostSource = "none";
 
 const ERROR_MAP: Record<string, string> = {
   missing_api_key: "No API key. Run /login tokens.bd.",
@@ -42,9 +67,9 @@ const ERROR_MAP: Record<string, string> = {
   no_funding: "No active plan and no wallet balance. Subscribe or top up. Try /tokens-suggest for a cheaper model.",
   outstanding_debt: "Negative balance. Top up to clear it.",
   member_cap_reached: "Team member cap reached. Ask admin.",
-  rate_limited: "Rate limited (RPM). Wait Retry-After seconds.",
+  rate_limited: "Rate limited (RPM). Wait Retry-After seconds. Scattered parallelism helps more than retries.",
   concurrency_limit: "Too many in flight. Reduce parallelism. Retry-After: 2s.",
-  window_exhausted: "Usage window exhausted. Wait for reset (can be hours). Try /tokens-suggest for a cheaper model.",
+  window_exhausted: "Usage window exhausted. Wait for reset (timing in /tokens-status). Do not retry in a loop.",
   model_limit_reached: "Model allowance used up. Switch models or wait. Try /tokens-suggest for a cheaper model.",
   rate_limit_exceeded: "Upstream rate limited. Retry with backoff.",
   upstream_unreachable: "Upstream unreachable. Retry with backoff.",
@@ -98,9 +123,10 @@ function extractApiKey(credential: Credential | undefined): string | undefined {
   return loose.key ?? loose.access;
 }
 
-// Pi owns chat auth (runtime --api-key > stored > models.json > env TOKENS_API_KEY).
-// Extension pollers use ctx.modelRegistry.getApiKeyForProvider() first; the
-// helpers below keep the manual fallback for contexts without a registry.
+// Pi owns chat auth (runtime --api-key > stored > models.json > env
+// TOKENS_API_KEY) and API-key resolution for the usage poller. Direct
+// auth.json reads were removed: they could return a different key than
+// the one Pi is actually using.
 function agentDir(): string {
   return join(process.env.HOME ?? "", ".pi", "agent");
 }
@@ -113,27 +139,9 @@ function packageRootDir(): string {
   }
 }
 
-function firstExisting(candidates: string[]): string | undefined {
-  for (const candidate of candidates) {
-    if (candidate && existsSync(candidate)) return candidate;
-  }
-  return undefined;
-}
-
 function readJson(path: string): any {
   try {
     return JSON.parse(readFileSync(path, "utf8"));
-  } catch {
-    return undefined;
-  }
-}
-
-function resolveApiKeySync(): string | undefined {
-  if (process.env.TOKENS_API_KEY) return process.env.TOKENS_API_KEY;
-  try {
-    const auth = readJson(join(agentDir(), "auth.json")) ?? {};
-    const stored = auth[PROVIDER_ID] ?? {};
-    return stored.access ?? stored.key;
   } catch {
     return undefined;
   }
@@ -146,7 +154,7 @@ async function resolveApiKey(ctx?: any): Promise<string | undefined> {
       const key = await registry.getApiKeyForProvider(PROVIDER_ID);
       if (key) return key;
     } catch {
-      // fall through to manual fallback
+      // fall through
     }
   }
   if (registry?.getProviderAuth) {
@@ -157,22 +165,22 @@ async function resolveApiKey(ctx?: any): Promise<string | undefined> {
       // fall through
     }
   }
-  return resolveApiKeySync();
+  // No registry: Pi's env path is the only remaining source.
+  return process.env.TOKENS_API_KEY || undefined;
 }
 
-function loadCosts(): Record<string, CostEntry> {
+// Bundled costs.json is a fallback only. The live /api/models catalogue is
+// the source of truth for prices and context windows.
+function loadFallbackCosts(): Record<string, CostEntry> {
   const candidates = [
     join(agentDir(), "tokens-costs.json"),
-    join(agentDir(), "costs.json"),
     join(packageRootDir(), "costs.json"),
-    join(process.cwd(), "costs.json"),
   ];
   for (const candidate of candidates) {
     if (!existsSync(candidate)) continue;
     const data = readJson(candidate);
     if (data?.models && typeof data.models === "object") return data.models;
     if (data && typeof data === "object" && !data._note && !data.roles) {
-      // tolerate a bare id -> cost map
       const values = Object.values(data);
       if (values.length && typeof values[0] === "object" && values[0] !== null && "input" in (values[0] as any)) {
         return data as Record<string, CostEntry>;
@@ -182,7 +190,74 @@ function loadCosts(): Record<string, CostEntry> {
   return {};
 }
 
-function loadLadder(): LadderMap {
+function effectiveCosts(): Record<string, CostEntry> {
+  if (Object.keys(lastCosts).length) return lastCosts;
+  return loadFallbackCosts();
+}
+
+// ---------------------------------------------------------------------------
+// Dynamic catalog (prices + context windows) from https://tokens.bd/api/models
+// ---------------------------------------------------------------------------
+
+async function fetchCatalog(signal?: AbortSignal): Promise<CatalogModel[]> {
+  try {
+    const res = await fetch(CATALOG_URL, { signal });
+    if (!res.ok) return [];
+    const data = (await res.json()) as { models?: any[] };
+    const out: CatalogModel[] = [];
+    for (const m of Array.isArray(data.models) ? data.models : []) {
+      const alias = String(m?.alias ?? "").trim();
+      if (!alias || m?.isActive === false) continue;
+      const pricing = m?.pricing ?? {};
+      out.push({
+        alias,
+        contextWindow: num(m?.contextWindow, 0),
+        input: num(pricing.inputPricePerMillionUsd, Number.NaN),
+        output: num(pricing.outputPricePerMillionUsd, Number.NaN),
+      });
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+function buildCosts(catalog: CatalogModel[]): Record<string, CostEntry> {
+  const costs: Record<string, CostEntry> = {};
+  for (const m of catalog) {
+    if (!Number.isFinite(m.input) || !Number.isFinite(m.output)) continue;
+    // tokens.bd bills unknown cache prices at the input price.
+    costs[m.alias] = {
+      input: m.input,
+      output: m.output,
+      cacheRead: m.input,
+      cacheWrite: m.input,
+      contextWindow: m.contextWindow || 128000,
+    };
+  }
+  return costs;
+}
+
+// Roles are derived from the live catalog on each refresh. Explicit user
+// ladders (agent file, then env) override the algorithm per role.
+function deriveLadder(catalog: CatalogModel[]): LadderMap {
+  const priced = catalog.filter((m) => Number.isFinite(m.input) && Number.isFinite(m.output));
+  const byCost = [...priced].sort((a, b) => a.input + a.output - (b.input + b.output));
+  const ids = (list: CatalogModel[]) => list.slice(0, 4).map((m) => m.alias);
+  const algorithm: LadderMap = {
+    fast: ids(byCost.filter((m) => m.contextWindow <= 256000)),
+    coder: ids(byCost.filter((m) => m.contextWindow >= 256000)),
+    reasoner: ids([...byCost].sort((a, b) => b.contextWindow - a.contextWindow).filter((m) => m.contextWindow >= 1000000)),
+    "long-context": ids([...byCost].sort((a, b) => b.contextWindow - a.contextWindow)),
+    private: ids(byCost),
+    research: ids(byCost),
+  };
+  // Fill any empty role from the cheapest overall list so route never starves.
+  const cheapest = ids(byCost);
+  for (const role of Object.keys(algorithm)) {
+    if (!algorithm[role].length && cheapest.length) algorithm[role] = cheapest;
+  }
+
   const envOverride: LadderMap = {};
   for (const role of ALL_ROLES) {
     const envKey = `TOKENS_${role.replace("-", "_").toUpperCase()}`;
@@ -191,39 +266,14 @@ function loadLadder(): LadderMap {
       envOverride[role] = val.split(",").map((s: string) => s.trim()).filter(Boolean);
     }
   }
-  const candidates = [
-    join(agentDir(), "tokens-ladder.json"),
-    join(agentDir(), "ladder.json"),
-    join(packageRootDir(), "ladder.json"),
-    join(process.cwd(), "ladder.json"),
-  ];
-  for (const candidate of candidates) {
-    if (!existsSync(candidate)) continue;
-    const data = readJson(candidate);
+
+  const agentLadder = join(agentDir(), "tokens-ladder.json");
+  if (existsSync(agentLadder)) {
+    const data = readJson(agentLadder);
     const roles = (data?.roles ?? data) as LadderMap | undefined;
-    if (roles && typeof roles === "object") return { ...roles, ...envOverride };
+    if (roles && typeof roles === "object") return { ...algorithm, ...roles, ...envOverride };
   }
-  return envOverride;
-}
-
-// Legacy offline cache written by pre-native builds. Pi's models-store is
-// now the primary snapshot; keep reading this once for offline installs,
-// then stop depending on it.
-function readSnapshot(): any[] {
-  try {
-    const data = readJson(join(agentDir(), "tokens-models.json"));
-    return Array.isArray(data?.data) ? data.data : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeSnapshot(models: any[]) {
-  try {
-    writeFileSync(join(agentDir(), "tokens-models.json"), `${JSON.stringify({ data: models }, null, 2)}\n`, { mode: 0o644 });
-  } catch {
-    // best-effort legacy compat only
-  }
+  return { ...algorithm, ...envOverride };
 }
 
 async function fetchUsage(apiKey: string): Promise<any> {
@@ -304,10 +354,9 @@ function mapModels(models: any[], costs: Record<string, CostEntry>) {
   return mapped;
 }
 
+// Pi's models store is the snapshot. A failed live fetch never wipes it.
 function storedFallback(context: RefreshModelsContext): any[] {
   if (context.stored?.models?.length) return context.stored.models as any[];
-  const legacy = readSnapshot();
-  if (legacy.length) return mapModels(legacy, loadCosts());
   return [];
 }
 
@@ -316,28 +365,21 @@ async function fetchNativeModels(context: RefreshModelsContext): Promise<any[]> 
   if (!apiKey) return storedFallback(context);
   const live = await fetchModelsRaw(apiKey, context.signal);
   if (!live.length) {
-    // An empty live catalog is only trustworthy when the request actually
-    // succeeded; fetchModelsRaw collapses both failure and empty to [].
-    // Re-check reachability so offline glitches never wipe the Pi snapshot.
-    try {
-      const probe = await fetch(MODELS_URL, {
-        headers: { Authorization: `Bearer ${apiKey}` },
-        signal: context.signal,
-      });
-      if (!probe.ok) return storedFallback(context);
-      const data = (await probe.json()) as { data?: any[] };
-      const raw = Array.isArray(data.data) ? data.data : [];
-      if (!raw.length && context.stored?.models?.length) return storedFallback(context);
-      const mapped = mapModels(raw, loadCosts());
-      writeSnapshot(raw);
-      return mapped;
-    } catch {
-      return storedFallback(context);
-    }
+    // Empty list may mean a failed request or an empty key allow-list.
+    // Never wipe the snapshot on failure either way.
+    return storedFallback(context);
   }
-  const mapped = mapModels(live, loadCosts());
-  writeSnapshot(live);
-  return mapped;
+  const catalog = await fetchCatalog(context.signal);
+  if (catalog.length) {
+    lastCatalog = catalog;
+    lastCosts = buildCosts(catalog);
+    lastCostSource = "tokens.bd/api/models";
+  } else {
+    lastCatalog = [];
+    lastCosts = loadFallbackCosts();
+    lastCostSource = "bundled costs.json";
+  }
+  return mapModels(live, lastCosts);
 }
 
 // ---- ladder router retry policy ----
@@ -424,9 +466,9 @@ function pickNextPhysical(ctx: any, ids: string[], skip?: string): any | null {
 }
 
 function routeForRole(role: string, request: any, ctx: any): any {
-  const ids = loadLadder()[role] ?? [];
+  const ids = deriveLadder(lastCatalog)[role] ?? [];
   if (!ids.length) {
-    throw new Error(`No ladder for ${role}. Set ladder.json roles.${role} or TOKENS_${role.toUpperCase().replace("-", "_")}.`);
+    throw new Error(`No ladder for ${role}. Catalog offline and no tokens-ladder.json override. Check /v1/models.`);
   }
   const sticky = request.failed ?? request.previous;
   if (request.reason === "retry" && sticky?.model) {
@@ -446,7 +488,7 @@ function routeForRole(role: string, request: any, ctx: any): any {
   }
   const first = pickNextPhysical(ctx, ids);
   if (first) return { model: first, thinkingLevel: request.thinkingLevel ?? "medium" };
-  throw new Error(`Ladder ${role} has no available model. Check /v1/models and ladder ids.`);
+  throw new Error(`Ladder ${role} has no available model. Check /v1/models and account limits.`);
 }
 
 export default function (pi: ExtensionAPI) {
@@ -518,14 +560,15 @@ export default function (pi: ExtensionAPI) {
   });
   pi.registerProvider(provider);
 
-  // Ladder virtual models: Pi owns selection/store/sticky; extension owns order.
+  // Ladder virtual models: Pi owns selection/store/sticky; extension owns
+  // order. Order is derived from the live catalog at refresh time.
   for (const role of ALL_ROLES) {
     const label = role.replace("-", " ");
     pi.registerVirtualModel({
       provider: PROVIDER_ID,
       id: role,
       name: `Tokens ${label} (ladder)`,
-      thinkingLevels: ["low", "medium", "high"],
+      thinkingLevels: ROLE_THINKING_LEVELS[role] ?? ["low", "medium", "high"],
       contextWindow: 1100000,
       maxTokens: 8192,
       route(request: any, ctx: any) {
@@ -539,7 +582,7 @@ export default function (pi: ExtensionAPI) {
     provider: PROVIDER_ID,
     id: "auto",
     name: "Auto (ladder: fast)",
-    thinkingLevels: ["low", "medium", "high"],
+    thinkingLevels: ROLE_THINKING_LEVELS.fast,
     contextWindow: 1100000,
     maxTokens: 8192,
     route(request: any, ctx: any) {
@@ -612,22 +655,24 @@ export default function (pi: ExtensionAPI) {
     description: "List tokens.bd error codes and fixes",
     handler: async (_args: any, ctx: any) => {
       const lines = Object.entries(ERROR_MAP).map(([code, msg]) => `${code}: ${msg}`);
+      if (lastRequestId) lines.unshift(`Last request id: ${lastRequestId}`);
       ctx.ui.notify(lines.join("\n"), "info");
     },
   });
 
   pi.registerCommand("tokens-costs", {
-    description: "Show loaded per-model costs from tokens-costs.json",
+    description: "Show per-model costs (live catalog, bundled fallback)",
     handler: async (_args: any, ctx: any) => {
-      const costs = loadCosts();
+      const costs = effectiveCosts();
       const entries = Object.entries(costs);
       if (entries.length === 0) {
-        ctx.ui.notify("No costs loaded. Copy costs.json to ~/.pi/agent/tokens-costs.json", "warning");
+        ctx.ui.notify("No costs loaded.", "warning");
         return;
       }
       const lines = entries.map(([id, c]) =>
         `${id}: in=$${c.input}/M out=$${c.output}/M ctx=${c.contextWindow}`
       );
+      lines.unshift(`Source: ${lastCostSource}`);
       ctx.ui.notify(lines.join("\n"), "info");
     },
   });
@@ -659,7 +704,7 @@ export default function (pi: ExtensionAPI) {
         return;
       }
       const models = await fetchModelsRaw(apiKey);
-      const costs = loadCosts();
+      const costs = effectiveCosts();
       const lines = models
         .map((m: any) => {
           const c = costs[m.id];
@@ -673,13 +718,13 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("tokens-suggest", {
     description: "Suggest cheapest model for routine work",
     handler: async (_args: any, ctx: any) => {
-      const costs = loadCosts();
+      const costs = effectiveCosts();
       const entries = Object.entries(costs);
       if (entries.length === 0) {
-        ctx.ui.notify("No costs loaded. Copy costs.json to ~/.pi/agent/tokens-costs.json", "warning");
+        ctx.ui.notify("No costs loaded.", "warning");
         return;
       }
-      const cheapest = entries.sort((a: any, b: any) => a[1].input - b[1].input)[0];
+      const cheapest = entries.sort((a: any, b: any) => a[1].input + a[1].output - (b[1].input + b[1].output))[0];
       ctx.ui.notify(`Cheapest: ${cheapest[0]} ($${cheapest[1].input}/M in, $${cheapest[1].output}/M out)`, "info");
     },
   });
