@@ -1,6 +1,51 @@
 # tokens.bd adapter for Pi
 
-Pi provider extension for [tokens.bd](https://tokens.bd). Adds tokens.bd as a native provider with dynamic model catalog, usage widget, and error mapping.
+Pi provider extension for [tokens.bd](https://tokens.bd). Adds tokens.bd as native provider. Dynamic model catalog, usage widget, error mapping.
+
+<details>
+<summary>CONTEXT</summary>
+
+This repo is a Pi provider extension. Pi is a terminal coding agent. A provider extension adds one model API to Pi. One model API means one base URL plus auth plus a model list. Source of truth is this repo. Source of truth is the master copy. The AI edits this repo. The AI never commits secrets, keys, or usage logs.
+
+Install steps:
+
+1. Run `pi install git:github.com/ashik-maybe/tokens.bd-adapter-for-pi.dev`.
+2. Create an API key at `tokens.bd/dashboard/keys`.
+3. Run `pi`.
+4. Run `/login tokens.bd`.
+5. Enter the `tok_live_...` key. Key is stored in `~/.pi/agent/auth.json`.
+6. Select a `tokens.bd/` model with `/model`.
+7. Press `Ctrl+S` to save as default.
+
+Package layout:
+
+1. `ladder.json` holds ladder order. Ladder means an ordered model list per role. Role means `fast`, `coder`, `reasoner`, `long-context`, `private`, `research`.
+2. `costs.json` holds pricing. Costs show in the footer and `/session`.
+3. Both files ship inside the package. Bundled means inside the installed package. No copying needed.
+4. Override role order only by copying `ladder.json` to `~/.pi/agent/tokens-ladder.json`.
+5. Override prices only by copying `costs.json` to `~/.pi/agent/tokens-costs.json`.
+
+Commands:
+
+1. `/tokens-status` shows plan, usage windows, wallet, key limits.
+2. `/tokens-costs` shows loaded per-model pricing.
+3. `/tokens-compare` compares available models by cost.
+4. `/tokens-suggest` suggests the cheapest model for routine work.
+5. `/tokens-history` shows 7-day usage history.
+6. `/tokens-errors` lists error codes and fixes.
+7. `/tokens-plan <goal>` plans a task by cost.
+8. `/scoped-models` limits model cycling to cheap models.
+
+Rules:
+
+1. The AI never prints the API key.
+2. The AI never commits `~/.pi/agent/auth.json`. Auth file means the file with provider credentials.
+3. Retry escalates one step down only on quota and 5xx errors. Quota means `rate_limit_exceeded` or `window_exhausted`. 5xx means server-side failures.
+4. Auth, billing, spend-cap, and input errors fail fast. Fail fast means stop without trying the next model.
+5. First physical model in each role list wins.
+6. `auto` is an alias to `fast`.
+
+</details>
 
 ## Install
 
@@ -8,7 +53,7 @@ Pi provider extension for [tokens.bd](https://tokens.bd). Adds tokens.bd as a na
 pi install git:github.com/ashik-maybe/tokens.bd-adapter-for-pi.dev
 ```
 
-Or try without installing:
+Try without installing:
 
 ```bash
 pi -e git:github.com/ashik-maybe/tokens.bd-adapter-for-pi.dev
@@ -16,29 +61,26 @@ pi -e git:github.com/ashik-maybe/tokens.bd-adapter-for-pi.dev
 
 ## Setup
 
-1. Create an API key at [tokens.bd/dashboard/keys](https://tokens.bd/dashboard/keys).
-2. Run `pi`.
-3. `/login tokens.bd` — enter your `tok_live_...` key.
-4. `/model` → select a `tokens.bd/` model.
-5. `Ctrl+S` to save as default.
+1. Key at [tokens.bd/dashboard/keys](https://tokens.bd/dashboard/keys).
+2. `pi`.
+3. `/login tokens.bd` — `tok_live_...`.
+4. `/model` — pick `tokens.bd/` model.
+5. `Ctrl+S` — save default.
 
-The key is stored in `~/.pi/agent/auth.json`. No environment variable needed.
-Existing OAuth logins from earlier adapter versions keep working; new logins are stored as standard API-key credentials through Pi's native provider auth.
+Key in `~/.pi/agent/auth.json`. No env var needed. Old OAuth logins keep working; new logins use native API-key auth.
 
-### Environment variable (alternative)
-
-If you prefer env vars (CI, headless):
+### Env var (alt, CI/headless)
 
 ```bash
 export TOKENS_API_KEY="tok_live_your_key"
 pi
 ```
 
-Pi resolves `$TOKENS_API_KEY` automatically. `/login` takes precedence if both are set.
+Pi reads `$TOKENS_API_KEY`. `/login` wins when both set.
 
-### models.json (alternative)
+### models.json (alt)
 
-If you prefer config over the extension (the extension registers provider `tokens.bd`):
+Config instead of extension (extension registers `tokens.bd`):
 
 ```json
 {
@@ -55,66 +97,66 @@ If you prefer config over the extension (the extension registers provider `token
 }
 ```
 
-Place in `~/.pi/agent/models.json`. The extension is not needed in this case.
+`~/.pi/agent/models.json`. No extension needed.
 
 ## Commands
 
-| Command | Description |
+| Command | Does |
 |---|---|
-| `/tokens-status` | Show plan, usage windows, wallet balance, key limits |
-| `/tokens-costs` | Show loaded per-model pricing from tokens-costs.json |
-| `/tokens-compare` | Compare available models by cost |
-| `/tokens-suggest` | Suggest cheapest model for routine work |
-| `/tokens-history` | Show 7-day usage history |
-| `/tokens-errors` | List all error codes and fixes |
+| `/tokens-status` | Plan, usage windows, wallet, key limits |
+| `/tokens-costs` | Loaded per-model pricing |
+| `/tokens-compare` | Models by cost |
+| `/tokens-suggest` | Cheapest model, routine work |
+| `/tokens-history` | 7-day usage |
+| `/tokens-errors` | Error codes, fixes |
 
 ## Capabilities
 
-- **Text input** default (`input: ["text"]`). Vision/tools vary by model; catalog pages list support, `/v1/models` does not yet expose it.
-- **Tool calling** via Pi's built-in OpenAI-compatible handler.
-- **Streaming** via Pi's built-in SSE handler.
-- **Reasoning** via `reasoning_effort` only on models flagged reasoning in future catalog. Defaults off until `/v1/models` exposes capability.
-- **Structured output** via `response_format` (passed through to the provider).
+- Text input default (`input: ["text"]`). Vision/tools per model; catalog shows support, `/v1/models` doesn't yet.
+- Tool calling: Pi OpenAI-compatible handler.
+- Streaming: Pi SSE handler.
+- Reasoning: `reasoning_effort` when catalog flags reasoning. Off until `/v1/models` exposes it.
+- Structured output: `response_format` passthrough.
 
 ## Footer widget
 
-Shows wallet balance and percent used. Refreshes every 60 seconds.
+Balance + percent. Refresh 60s.
 
 ```
 tokens.bd: $12.50 | 26% used
 ```
 
-Proactive warnings fire when a usage window hits 90% or wallet drops below $1.
+Warns at 90% window or <$1 wallet.
 
-## Ladder virtual models
+## Ladder
 
-Ladder order lives in `ladder.json`. Pricing stays in `costs.json`.
+Order: `ladder.json`. Price: `costs.json`.
 
-Extension registers `tokens.bd/fast`, `coder`, `reasoner`, `long-context`, `private`, `research`, plus `auto` as alias to `fast`. Select with `/model`. First physical model in each role list wins. Retry escalates one step down that list.
+Registers `tokens.bd/fast|coder|reasoner|long-context|private|research` + `auto` (= `fast`). `/model` to pick. First model in list wins. Retry steps down.
 
-Retry only escalates retryable quota/5xx errors (`rate_limited`, `rate_limit_exceeded`, `upstream_*`, `model_limit_reached`, context overflow). Auth, billing, spend-cap, and input errors fail fast so a bad key, empty wallet, or malformed request does not burn usage on the rest of the ladder.
+Retry only quota/5xx (`rate_limited`, `rate_limit_exceeded`, `upstream_*`, `model_limit_reached`, context overflow). Auth/billing/spend-cap/input fail fast.
 
-Bundled `ladder.json` and `costs.json` ship with the package — no copying needed. Copy `ladder.json` to `~/.pi/agent/tokens-ladder.json` to override. Override one role by env:
+Bundled files ship. Override: copy `ladder.json` → `~/.pi/agent/tokens-ladder.json`. One role by env:
 
 ```bash
 export TOKENS_CODER="id1,id2"
 ```
 
-## Scoped models (cost efficiency)
+## Scoped models
 
-Use `/scoped-models` to limit `Ctrl+P` cycling to cheap models. Scope to free models for routine work, switch manually for hard tasks.
+`/scoped-models` — `Ctrl+P` cycles cheap models only. Free for routine, manual switch for hard.
 
-## Tokens skill
+## Skill
 
-Ships a `tokens-bd` skill. Pi loads it when cost/usage is relevant. Includes codemode recipes.
+`tokens-bd` skill ships. Loads on cost/usage topics. Codemode recipes inside.
 
-## Tokens plan template
+## Plan template
 
-Use `/tokens-plan <goal>` for cost-aware task planning.
+`/tokens-plan <goal>` — cost-aware task plan.
 
 ## Usage history
 
-Usage logged as `tokens-usage` entries in the session branch every 60s. Run `/tokens-history` for session trend. Set `TOKENS_DAILY_BUDGET` to warn on daily spend.
+`tokens-usage` session entries every 60s. `/tokens-history` trend. `TOKENS_DAILY_BUDGET` warns daily spend.
 
 ## Update
 
@@ -122,7 +164,7 @@ Usage logged as `tokens-usage` entries in the session branch every 60s. Run `/to
 pi update
 ```
 
-Or reinstall:
+Reinstall:
 
 ```bash
 pi remove git:github.com/ashik-maybe/tokens.bd-adapter-for-pi.dev
@@ -135,60 +177,45 @@ pi install git:github.com/ashik-maybe/tokens.bd-adapter-for-pi.dev
 pi remove git:github.com/ashik-maybe/tokens.bd-adapter-for-pi.dev
 ```
 
-This removes the package declaration from `settings.json`. The extension files are cleaned up by Pi.
+Removes `settings.json` declaration. Pi cleans extension files.
 
 ## Troubleshooting
 
-### "No models available"
+### No models
 
-Your key may have an allow-list, or your plan/wallet can't cover any model. Check:
-- `GET https://tokens.bd/v1/models` with your key.
-- Your plan and wallet on [tokens.bd/dashboard/billing](https://tokens.bd/dashboard/billing).
+Key allow-list, or plan/wallet covers nothing. Check `GET https://tokens.bd/v1/models` (key) + billing page.
 
-### "Invalid API key"
+### Invalid key
 
-- Recopy the key (shown only once at creation).
-- Create a new key at [tokens.bd/dashboard/keys](https://tokens.bd/dashboard/keys).
-- If using env var, check `echo $TOKENS_API_KEY`.
+Recopy (shown once). New key at dashboard. Env var: `echo $TOKENS_API_KEY`.
 
 ### Rate limits
 
-- 60 requests per minute (per account, all keys combined).
-- Concurrency: 10 with a plan, 3 without.
-- Usage windows (5h/weekly/monthly) can block requests with `window_exhausted`.
-- Monthly spend cap per key.
+60 req/min per account, all keys. Concurrency 10 with plan, 3 without. `window_exhausted` blocks. Monthly spend cap per key. Details: `docs/rate-limits`. `/tokens-errors` full reference.
 
-See `docs/rate-limits` on tokens.bd for details. Run `/tokens-errors` for the full error code reference.
+### 402 / 403
 
-### 402 / 403 errors
+`insufficient_credits` / `no_funding`: top up or subscribe. `monthly_spend_cap_exceeded`: cap hit, other key or wait. `tier_permission_denied`: plan excludes model, upgrade or fund wallet.
 
-- `insufficient_credits` / `no_funding`: top up or subscribe.
-- `monthly_spend_cap_exceeded`: key cap reached, use another key or wait.
-- `tier_permission_denied`: plan doesn't include this model, upgrade or add wallet funds.
+### Model ignores images/tools
 
-### Model ignores images or tools
-
-Some models don't support vision or tool calling. The gateway returns a 400 or drops the feature. Check the model's page on [tokens.bd/models](https://tokens.bd/models).
+Model lacks vision/tool support. Gateway 400s or drops feature. Check [tokens.bd/models](https://tokens.bd/models).
 
 ## Per-model costs (optional)
 
-Bundled `costs.json` ships with the package and is used automatically. Copy it to `~/.pi/agent/tokens-costs.json` only to override prices from [tokens.bd/models](https://tokens.bd/models). The adapter loads it on startup and shows per-model cost in Pi's footer and `/session`. Models without cache prices are billed at input price by the gateway; adapter mirrors that.
-
-Copy `ladder.json` from the repo to `~/.pi/agent/tokens-ladder.json` only to override role order.
-
-Update `costs.json` whenever prices change. The file includes a `_note` with the source URL and date.
+Bundled `costs.json` auto-loads. Copy to `~/.pi/agent/tokens-costs.json` only to override from [tokens.bd/models](https://tokens.bd/models). Footer + `/session` show cost. No cache price → billed at input price; adapter mirrors. `ladder.json` → `~/.pi/agent/tokens-ladder.json` override only. Refresh `costs.json` on price change; `_note` holds source + date.
 
 ## Offline catalog
 
-Pi caches the discovered model list in its models store. After one successful fetch, `/model` keeps listing the snapshot offline (`pi --offline`). A failed refresh never wipes the cached catalog.
+Cache in models store. One fetch → `/model` lists snapshot offline (`pi --offline`). Failed refresh never wipes.
 
 ## Notes
 
-- Pi packages run with your user permissions. Review the source before installing.
-- The key is stored in `~/.pi/agent/auth.json`. Never commit it.
-- No custom streaming — Pi's built-in SSE handler covers it.
-- No hardcoded keys — native auth via `/login`.
-- Dynamic model catalog — each key sees only its allowed models.
+- Pi packages run with user permissions. Read source before install.
+- Key in `~/.pi/agent/auth.json`. Never commit.
+- No custom streaming; Pi SSE covers.
+- No hardcoded keys; native `/login` auth.
+- Dynamic catalog; key sees allowed models only.
 
 ## Links
 
