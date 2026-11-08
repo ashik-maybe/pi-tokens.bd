@@ -1,6 +1,6 @@
 {
   "name": "tokens.bd-adapter-for-pi.dev",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Pi provider extension for tokens.bd",
   "type": "module",
   "main": "src/index.ts",

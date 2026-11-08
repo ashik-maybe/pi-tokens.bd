@@ -1,6 +1,6 @@
 # tokens.bd adapter for Pi
 
-Pi provider extension for [tokens.bd](https://tokens.bd). Adds tokens.bd as native provider. Dynamic model catalog, usage widget, error mapping.
+[Pi](https://pi.dev/) extension for [tokens.bd](https://tokens.bd). Adds tokens.bd as native provider. Dynamic model catalog, usage widget, error mapping.
 
 <details>
 <summary>CONTEXT</summary>
@@ -110,9 +110,7 @@ Config instead of extension (extension registers `tokens.bd`):
       "baseUrl": "https://tokens.bd/v1",
       "api": "openai-completions",
       "apiKey": "$TOKENS_API_KEY",
-      "models": [
-        { "id": "deepseek/deepseek-v4.1-flash", "input": ["text", "image"] }
-      ]
+      "models": [{ "id": "deepseek/deepseek-v4.1-flash", "input": ["text", "image"] }]
     }
   }
 }
@@ -122,14 +120,14 @@ Config instead of extension (extension registers `tokens.bd`):
 
 ## Commands
 
-| Command | Does |
-|---|---|
-| `/tokens-status` | Plan, usage windows, wallet, key limits |
-| `/tokens-costs` | Loaded per-model pricing |
-| `/tokens-compare` | Models by cost |
-| `/tokens-suggest` | Cheapest model, routine work |
-| `/tokens-history` | 7-day usage |
-| `/tokens-errors` | Error codes, fixes |
+| Command           | Does                                    |
+| ----------------- | --------------------------------------- |
+| `/tokens-status`  | Plan, usage windows, wallet, key limits |
+| `/tokens-costs`   | Loaded per-model pricing                |
+| `/tokens-compare` | Models by cost                          |
+| `/tokens-suggest` | Cheapest model, routine work            |
+| `/tokens-history` | 7-day usage                             |
+| `/tokens-errors`  | Error codes, fixes                      |
 
 ## Capabilities
 
@@ -241,5 +239,4 @@ Cache in models store. One fetch → `/model` lists snapshot offline (`pi --offl
 ## Links
 
 - [tokens.bd docs](https://tokens.bd/docs)
-- [Pi](https://pi.dev)
 - [Pi packages](https://pi.dev/packages)
