@@ -9,7 +9,7 @@ This repo is a Pi provider extension. Pi is a terminal coding agent. A provider 
 
 Install steps:
 
-1. Run `pi install git:github.com/ashik-maybe/tokens.bd-adapter-for-pi.dev`.
+1. Run `pi install git:github.com/ashik-maybe/tokens.bd-adapter-for-pi.dev`. Manual alternative: clone to `~/Documents/tokens.bd-adapter-for-pi.dev`, then `pi -e` that folder, or copy it to `~/.pi/agent/extensions/`.
 2. Create an API key at `tokens.bd/dashboard/keys`.
 3. Run `pi`.
 4. Run `/login tokens.bd`.
@@ -57,6 +57,28 @@ Try without installing:
 ```bash
 pi -e git:github.com/ashik-maybe/tokens.bd-adapter-for-pi.dev
 ```
+
+## Manual install (no `pi install`)
+
+Use when you want the code in a folder you control, or to edit it live.
+
+```bash
+git clone git@github.com:ashik-maybe/tokens.bd-adapter-for-pi.dev.git ~/Documents/tokens.bd-adapter-for-pi.dev
+```
+
+Point Pi at the folder. One of these:
+
+```bash
+pi -e ~/Documents/tokens.bd-adapter-for-pi.dev   # one session, no settings change
+```
+
+Or copy it into Pi's auto-discovered extensions folder (no `-e`, no `settings.json` edit):
+
+```bash
+cp -r ~/Documents/tokens.bd-adapter-for-pi.dev ~/.pi/agent/extensions/tokens.bd-adapter-for-pi.dev
+```
+
+Then `/login tokens.bd` as usual. Edits take effect on next `pi` start, or immediately with `/reload`.
 
 ## Setup
 
