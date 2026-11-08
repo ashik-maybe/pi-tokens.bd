@@ -241,5 +241,5 @@ Cache in models store. One fetch → `/model` lists snapshot offline (`pi --offl
 ## Links
 
 - [tokens.bd docs](https://tokens.bd/docs)
-- [Pi docs](https://pi.dev/docs)
-- [Pi packages](https://pi.dev/packages)
+- [Pi](https://pi.dev)
+- [Pi packages](https://pi.dev/package)
