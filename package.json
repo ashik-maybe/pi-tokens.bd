@@ -1,5 +1,5 @@
 {
-  "name": "tokens.bd-adapter-for-pi.dev",
+  "name": "pi-tokens.bd",
   "version": "0.5.0",
   "description": "Pi provider extension for tokens.bd",
   "type": "module",
