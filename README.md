@@ -34,6 +34,18 @@ Commands:
 6. `/tokens errors` lists error codes and fixes.
 8. `/scoped-models` limits model cycling to cheap models.
 
+Source layout:
+
+1. `src/index.ts`: wiring only. Registers providers, virtual models, hooks, and commands.
+2. `src/catalog.ts`: live catalog, costs, ladder build, `fetchNativeModels`.
+3. `src/router.ts`: pure role router using live catalog and extension state.
+4. `src/usage.ts`: usage poll, alerts, pre-flight guard, compact-overflow hint.
+5. `src/commands.ts`: `/tokens` handler — status, compare, suggest, history, errors, count.
+6. `src/errors.ts`: error-code classifier used by router and compare.
+7. `src/state.ts`: per-process shared state container.
+8. `src/utils.ts`: JSON reader, numeric coercion, API-key resolve.
+9. `src/config.ts`: endpoints, provider IDs, role thinking levels.
+
 Rules:
 
 1. The AI never prints the API key.

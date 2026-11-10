@@ -1,0 +1,208 @@
+// /tokens root handler + deprecated /tokens-* shims.
+// All wiring goes here to keep index.ts thin: provider + hooks + poller only.
+
+import {
+  resolveApiKey,
+} from "./utils.js";
+import {
+  fetchModelsRaw,
+  effectiveCosts,
+  getLastCatalog,
+  isAlwaysThinking,
+  deriveLadder,
+} from "./catalog.js";
+import {
+  fetchUsage,
+  formatWindow,
+} from "./usage.js";
+import { extensionState } from "./state.js";
+import { ERROR_MAP } from "./errors.js";
+import { COUNT_TOKENS_URL } from "./config.js";
+
+export function registerTokensCommands(pi: any): void {
+  const handlers = {
+    status: async (_args: any, ctx: any) => {
+      const apiKey = await resolveApiKey(ctx);
+      if (!apiKey) {
+        ctx.ui.notify("Run /login tokens.bd first.", "warning");
+        return;
+      }
+      const usage = await fetchUsage(apiKey);
+      if (!usage) {
+        ctx.ui.notify("Failed to fetch usage.", "error");
+        return;
+      }
+      extensionState.lastUsage = usage;
+      const lines: string[] = [];
+      if (usage.plan) {
+        lines.push(`Plan: ${usage.plan.name} (${usage.plan.tier})`);
+        if (usage.plan.periodEnd) lines.push(`Period ends: ${usage.plan.periodEnd}`);
+      } else {
+        lines.push("Plan: pay-as-you-go");
+      }
+      for (const w of usage.windows ?? []) {
+        lines.push(formatWindow(w));
+      }
+      if (usage.wallet && usage.wallet.balanceUsd !== null) lines.push(`Wallet: $${usage.wallet.balanceUsd.toFixed(2)} USD (BDT balance shown on dashboard only)`);
+      if (usage.key?.monthlySpendCapUsd) lines.push(`Key cap: $${usage.key.monthlySpendCapUsd}/mo`);
+      if (usage.key?.allowedModels) lines.push(`Allowed: ${usage.key.allowedModels.join(", ")}`);
+      if (extensionState.lastRequestId) lines.push(`Last request id: ${extensionState.lastRequestId}`);
+      ctx.ui.notify(lines.join("\n"), "info");
+    },
+
+    errors: async (_args: any, ctx: any) => {
+      const lines = Object.entries(ERROR_MAP).map(([code, msg]) => `${code}: ${msg}`);
+      if (extensionState.lastRequestId) lines.unshift(`Last request id: ${extensionState.lastRequestId}`);
+      ctx.ui.notify(lines.join("\n"), "info");
+    },
+
+    count: async (args: any, ctx: any) => {
+      const parts = (args ?? []).map(String);
+      let modelArg: string | undefined;
+      const textParts: string[] = [];
+      for (const part of parts) {
+        if (part.startsWith("--model=")) {
+          modelArg = part.slice("--model=".length).trim();
+        } else if (part.startsWith("--model ")) {
+          modelArg = part.slice("--model ".length).trim();
+        } else {
+          textParts.push(part);
+        }
+      }
+      const text = textParts.join(" ").trim();
+      if (!text) {
+        ctx.ui.notify("Provide text. Example: /tokens count --model deepseek/deepseek-v4.1-flash Explain idempotency.", "info");
+        return;
+      }
+      if (text.length > 8000) {
+        ctx.ui.notify("Text too large — split and retry.", "warning");
+        return;
+      }
+      const apiKey = await resolveApiKey(ctx);
+      if (!apiKey) {
+        ctx.ui.notify("Run /login tokens.bd first.", "warning");
+        return;
+      }
+      const currentModel = ctx?.model?.id ?? ctx?.currentModel?.id;
+      const findFlag = (id: string): boolean => !!ctx?.modelRegistry?.find?.("tokens.bd", id);
+      const inferredId = !findFlag(currentModel) ? (getLastCatalog()[0]?.alias ?? undefined) : currentModel;
+      const model =
+        (modelArg && modelArg.trim() ? modelArg.trim() : undefined)
+        || (currentModel && findFlag(currentModel) ? currentModel : inferredId)
+        || Object.values(deriveLadder(getLastCatalog()) ?? {}).flat()[0];
+      if (!model) {
+        ctx.ui.notify("Missing model and live catalog empty. Pass: /tokens count --model <id> <text>", "warning");
+        return;
+      }
+      try {
+        const res = await fetch(COUNT_TOKENS_URL, {
+          method: "POST",
+          headers: {
+            "x-api-key": apiKey,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ model, messages: [{ role: "user", content: text }] }),
+        });
+        const raw = await res.json().catch(() => undefined);
+        if (!res.ok) {
+          const code = String(raw?.error?.code ?? raw?.code ?? `HTTP ${res.status}`).toLowerCase();
+          const message = raw?.error?.message ?? raw?.message ?? "count failed";
+          ctx.ui.notify(`count failed: ${code} — ${message}`, "error");
+          return;
+        }
+        const inputTokens = Number(raw?.input_tokens ?? 0);
+        ctx.ui.notify(`${model}: input_tokens=${inputTokens} (not billed)`, "info");
+      } catch (err) {
+        ctx.ui.notify(`count failed: ${(err as Error).message || "(network)"}`, "error");
+      }
+    },
+
+    history: async (_args: any, ctx: any) => {
+      const branch = ctx.sessionManager.getBranch();
+      const entries = branch.filter((e: any) => e.type === "custom" && e.customType === "tokens-usage");
+      if (entries.length === 0) {
+        ctx.ui.notify("No usage history in this session yet.", "info");
+        return;
+      }
+      const lines = entries.slice(-7).map((e: any) => {
+        const d = new Date(e.data.date).toLocaleDateString();
+        const w = e.data.windows?.[0];
+        return `${d}: $${e.data.wallet?.toFixed(2) ?? "?"} | ${w ? `${w.percentUsed}%` : "n/a"}`;
+      });
+      ctx.ui.notify(lines.join("\n"), "info");
+    },
+
+    compare: async (_args: any, ctx: any) => {
+      const apiKey = await resolveApiKey(ctx);
+      if (!apiKey) {
+        ctx.ui.notify("Run /login tokens.bd first.", "warning");
+        return;
+      }
+      const models = await fetchModelsRaw(apiKey);
+      const costs = effectiveCosts();
+      const lines = models
+        .map((m: any) => {
+          const c = costs[m.id];
+          const always = isAlwaysThinking(String(m.id));
+          if (!c) return `${m.id}: (no cost data)${always ? " (always-on thinking)" : ""}`;
+          const note = always ? " (always-on thinking: effort=max)" : "";
+          return `${m.id}: in=$${c.input}/M out=$${c.output}/M cacheRead=$${c.cacheRead}/M ctx=${c.contextWindow}${note}`;
+        })
+        .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+      ctx.ui.notify(lines.join("\n"), "info");
+    },
+
+    suggest: async (_args: any, ctx: any) => {
+      const costs = effectiveCosts();
+      const entries = Object.entries(costs);
+      if (entries.length === 0) {
+        ctx.ui.notify("No costs loaded.", "warning");
+        return;
+      }
+      const cheapest = entries.sort((a: any, b: any) => a[1].input + a[1].output - (b[1].input + b[1].output))[0];
+      ctx.ui.notify(`Cheapest: ${cheapest[0]} ($${cheapest[1].input}/M in, $${cheapest[1].output}/M out)`, "info");
+    },
+  };
+
+  const MODEL_ALIASES: [string, keyof typeof handlers][] = [
+    ["tokens-status", "status"],
+    ["tokens-errors", "errors"],
+    ["tokens-count", "count"],
+    ["tokens-history", "history"],
+    ["tokens-compare", "compare"],
+    ["tokens-suggest", "suggest"],
+  ];
+
+  const deprecationWarned = new Set<string>();
+  for (const [oldName, key] of MODEL_ALIASES) {
+    pi.registerCommand(oldName, {
+      description: `Deprecated alias of /tokens ${key}; will call through`,
+      handler: async (args: any, ctx: any) => {
+        if (!deprecationWarned.has(oldName)) {
+          deprecationWarned.add(oldName);
+          try { ctx?.ui?.notify?.(`/${oldName} is deprecated; use /tokens ${key}`, "warning"); } catch {}
+        }
+        return handlers[key](args, ctx);
+      },
+    });
+  }
+
+  function tokensRootHandler(args: any, ctx: any): Promise<void> {
+    const raw: string = Array.isArray(args) ? args.join(" ") : String(args ?? "");
+    const parts = raw.trim().split(/\s+/).filter(Boolean);
+    const mode = (parts[0] ?? "status").toLowerCase();
+    const h = (handlers as any)[mode];
+    if (typeof h !== "function") {
+      const names = Object.keys(handlers).join(", ");
+      try { ctx?.ui?.notify?.(`Usage: /tokens [${names}]`, "info"); } catch {}
+      return Promise.resolve();
+    }
+    return h(parts.slice(1), ctx);
+  }
+
+  pi.registerCommand("tokens", {
+    description: "Tokens.bd one-stop: /tokens (status|compare|suggest|count|history|errors)",
+    handler: tokensRootHandler,
+  });
+}
