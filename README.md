@@ -52,6 +52,12 @@ Rules:
 pi install git:github.com/ashik-maybe/tokens.bd-adapter-for-pi.dev
 ```
 
+Pin a released version by tag:
+
+```bash
+pi install git:github.com/ashik-maybe/tokens.bd-adapter-for-pi.dev@v0.5.0
+```
+
 Try without installing:
 
 ```bash
@@ -240,3 +246,4 @@ Cache in models store. One fetch → `/model` lists snapshot offline (`pi --offl
 
 - [tokens.bd docs](https://tokens.bd/docs)
 - [Pi packages](https://pi.dev/packages)
+- [Changelog](CHANGELOG.md)
