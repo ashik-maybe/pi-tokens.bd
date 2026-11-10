@@ -1,300 +1,114 @@
-# tokens.bd adapter for Pi
+# Pi extension for Tokens.bd
 
-[Pi](https://pi.dev/) extension for [tokens.bd](https://tokens.bd). Adds tokens.bd as native provider. Dynamic model catalog, usage widget, error mapping.
+Pi extension. Adds [tokens.bd](https://tokens.bd) as a native provider. Dynamic catalog, usage widget, error mapping, optional router.
 
-<details>
-<summary>CONTEXT</summary>
+## Requirements
 
-This repo is a Pi provider extension. Pi is a terminal coding agent. A provider extension adds one model API to Pi. One model API means one base URL plus auth plus a model list. Source of truth is this repo. Source of truth is the master copy. The AI edits this repo. The AI never commits secrets, keys, or usage logs.
-
-Install steps:
-
-1. Run `pi install git:github.com/ashik-maybe/tokens.bd-adapter-for-pi.dev`. Manual alternative: clone to `~/Documents/tokens.bd-adapter-for-pi.dev`, then `pi -e` that folder, or copy it to `~/.pi/agent/extensions/`.
-2. Create an API key at `tokens.bd/dashboard/keys`.
-3. Run `pi`.
-4. Run `/login tokens.bd`.
-5. Enter the `tok_live_...` key. Key is stored in `~/.pi/agent/auth.json`.
-6. Select a `tokens.bd/` model with `/model`.
-7. Press `Ctrl+S` to save as default.
-
-Package layout:
-
-1. Pricing comes from `https://tokens.bd/api/models` at startup. `costs.json` is the offline fallback.
-2. Ladder order comes from the same live catalog. Ladder means an ordered model list per role. Role means `fast`, `coder`, `reasoner`, `long-context`, `research`. `private` is an alias of `fast`.
-3. Override role order only with an explicit `~/.pi/agent/tokens-ladder.json` file, or one role with `TOKENS_<ROLE>` env.
-4. Override prices only with Pi `models.json` cost entries, or `~/.pi/agent/tokens-costs.json`.
-
-Commands:
-
-1. `/tokens status` shows plan, usage windows, wallet, key limits.
-2. `/tokens compare` shows pricing, cache prices, source.
-3. `/tokens compare` compares available models by cost.
-4. `/tokens suggest` suggests the cheapest model for routine work.
-5. `/tokens history` shows 7-day usage history.
-6. `/tokens errors` lists error codes and fixes.
-8. `/scoped-models` limits model cycling to cheap models.
-
-Source layout:
-
-1. `src/index.ts`: wiring only. Registers providers, virtual models, hooks, and commands.
-2. `src/catalog.ts`: live catalog, costs, ladder build, `fetchNativeModels`.
-3. `src/router.ts`: pure role router using live catalog and extension state.
-4. `src/usage.ts`: usage poll, alerts, pre-flight guard, compact-overflow hint.
-5. `src/commands.ts`: `/tokens` handler — status, compare, suggest, history, errors, count.
-6. `src/errors.ts`: error-code classifier used by router and compare.
-7. `src/state.ts`: per-process shared state container.
-8. `src/utils.ts`: JSON reader, numeric coercion, API-key resolve.
-9. `src/config.ts`: endpoints, provider IDs, role thinking levels.
-
-Rules:
-
-1. The AI never prints the API key.
-2. The AI never commits `~/.pi/agent/auth.json`. Auth file means the file with provider credentials.
-3. Retry escalates one step down only on quota and 5xx errors. Quota means `rate_limit_exceeded` or `window_exhausted`. 5xx means server-side failures.
-4. Auth, billing, spend-cap, and input errors fail fast. Fail fast means stop without trying the next model.
-5. First physical model in each role list wins.
-6. `auto` is an alias to `fast`.
-
-</details>
+- Pi (any recent 1.x). peer deps: `@earendil-works/pi-coding-agent` and `@earendil-works/pi-ai`
+- Tokens.bd account (api key starts `tok_live_`)
+- Network access
 
 ## Install
 
-```bash
-pi install git:github.com/ashik-maybe/tokens.bd-adapter-for-pi.dev
-```
+    pi install git:github.com/ashik-maybe/tokens.bd-adapter-for-pi.dev
 
-Pin a released version by tag:
+Pin a tag:
 
-```bash
-pi install git:github.com/ashik-maybe/tokens.bd-adapter-for-pi.dev@v0.5.0
-```
+    pi install git:github.com/ashik-maybe/tokens.bd-adapter-for-pi.dev@v0.5.0
 
-Try without installing:
+Try without keeping:
 
-```bash
-pi -e git:github.com/ashik-maybe/tokens.bd-adapter-for-pi.dev
-```
+    pi -e git:github.com/ashik-maybe/tokens.bd-adapter-for-pi.dev
 
-## Manual install (no `pi install`)
+Uninstall:
 
-Use when you want the code in a folder you control, or to edit it live.
+    pi remove git:github.com/ashik-maybe/tokens.bd-adapter-for-pi.dev
 
-```bash
-git clone git@github.com:ashik-maybe/tokens.bd-adapter-for-pi.dev.git ~/Documents/tokens.bd-adapter-for-pi.dev
-```
-
-Point Pi at the folder. One of these:
-
-```bash
-pi -e ~/Documents/tokens.bd-adapter-for-pi.dev   # one session, no settings change
-```
-
-Or copy it into Pi's auto-discovered extensions folder (no `-e`, no `settings.json` edit):
-
-```bash
-cp -r ~/Documents/tokens.bd-adapter-for-pi.dev ~/.pi/agent/extensions/tokens.bd-adapter-for-pi.dev
-```
-
-Then `/login tokens.bd` as usual. Edits take effect on next `pi` start, or immediately with `/reload`.
+Or delete the cloned/copied folder. Pi auto-discovery rescans on next start.
 
 ## Setup
 
-1. Key at [tokens.bd/dashboard/keys](https://tokens.bd/dashboard/keys).
-2. `pi`.
-3. `/login tokens.bd` — `tok_live_...`.
-4. `/model` — pick `tokens.bd/` model.
-5. `Ctrl+S` — save default.
+    pi
+    /login tokens.bd
+    <paste tok_live_ key>
+    /model
+    <pick tokens.bd/<model>>
+    <ctrl+s>  # save as default
 
-Key in `~/.pi/agent/auth.json`. No env var needed. Old OAuth logins keep working; new logins use native API-key auth.
+Key lives in `~/.pi/agent/auth.json`. Never commit it.
 
-### Env var (alt, CI/headless)
+Headless alt:
 
-```bash
-export TOKENS_API_KEY="tok_live_your_key"
-pi
-```
+    export TOKENS_API_KEY="tok_live_..."
+    pi
 
-Pi reads `$TOKENS_API_KEY`. `/login` wins when both set.
+## Features
 
-### models.json (alt)
+- Auto catalog. Live pricing + model list on startup. Falls back to bundled `costs.json` offline.
+- Three provider variants. `tokens.bd` (chat completions) — `tokens.bd-responses` — `tokens.bd-messages`. Share the same key.
+- Role ladders. Alias models: `fast`, `coder`, `reasoner`, `long-context`, `private`, `research` — auto-rotated to cheapest available.
+- Virtual router. `tokens.bd/virtual-router` is opt-in and optional. Routes to the cheapest suitable allowlisted model for the current plan. Sticky on continuations; switches back at task boundary only.
+- Usage alerts. Panel on window consumption ≥75%, 90%, 100% and wallet <$1.
+- Retry safety. Quota / 5xx steps down ladder. Auth, billing, spend-cap, input errors fail fast.
 
-Config instead of extension (extension registers `tokens.bd`):
+## Virtual models registered
 
-```json
-{
-  "providers": {
-    "tokens": {
-      "baseUrl": "https://tokens.bd/v1",
-      "api": "openai-completions",
-      "apiKey": "$TOKENS_API_KEY",
-      "models": [{ "id": "deepseek/deepseek-v4.1-flash", "input": ["text", "image"] }]
-    }
-  }
-}
-```
+| Model | Effect |
+| --- | --- |
+| `tokens.bd/auto` | alias of `fast` |
+| `tokens.bd/fast` `coder` `reasoner` `long-context` `private` `research` | role ladders, price-ordered |
+| `tokens.bd/virtual-router` | opt-in budget router (see below) |
 
-`~/.pi/agent/models.json`. No extension needed.
+Provider variants reuse the same physical ids. Pick `tokens.bd-messages/claude-haiku-5-5` to use the Messages endpoint, for example.
+
+## Budget router
+
+Select `tokens.bd/virtual-router` from `/model`. Defaults: weekly plan, auto mode. `/tokens router` subcommand toggles:
+
+    /tokens router status
+    /tokens router plan weekly     # or monthly
+    /tokens router mode auto       # economy|hard also accepted
+
+Hints are positional: `[hard]` at the start of a message routes to the hard tier; `[cheap]` to the economy tier. Plain prompts land on the default balanced route. Reads `TOKENS_ROUTER_PLAN` and `TOKENS_ROUTER_MODE` env vars if set before launch.
 
 ## Commands
 
-| Command           | Does                                     |
-| ----------------- | ---------------------------------------- |
-| `/tokens`         | Help; default mode = `/tokens status`    |
-| `/tokens status`  | Plan, windows with reset clock, wallet, key limits |
-| `/tokens compare` | Models by cost; cache column; always-on thinking flagged; source shown |
-| `/tokens suggest` | Cheapest model, routine work             |
-| `/tokens count`   | Count input_tokens without inference; not billed |
-| `/tokens history` | 7-day usage                              |
-| `/tokens errors`  | Error codes, fixes                       |
-| `/tokens-*`       | Deprecated shims; call through once-per-session with notice |
+| Command | Does |
+| --- | --- |
+| `/tokens` | help / default `/tokens status` |
+| `/tokens status` | plan, remaining windows, wallet, key limits |
+| `/tokens compare` | models by cost; cache column; thinking shown |
+| `/tokens suggest` | cheapest routine model |
+| `/tokens count [--model <id>] <text>` | count prompt tokens; not billed |
+| `/tokens history` | 7-day trend |
+| `/tokens errors` | codes + fixes |
+| `/tokens router status|plan|mode` | budget router toggles |
 
-## Capabilities
+Deprecated shims `/tokens-status`, `/tokens-compare`, etc. are still accepted; they warn once per session and call through.
 
-- Text input default (`input: ["text"]`). Vision/tools per model; catalog shows support, `/v1/models` doesn't yet.
-- Tool calling: Pi OpenAI-compatible handler.
-- Streaming: Pi SSE handler.
-- Reasoning: `reasoning_effort` when catalog flags reasoning. Off until `/v1/models` exposes it.
-- Structured output: `response_format` passthrough (OpenAI Chat Completions).
+## Development
 
-### Provider variants
+Source under `src/`. Wiring in `index.ts`. Lane layout:
 
-Three providers are registered. Pick `/model` by backend:
+- `src/index.ts` wires providers, virtual models, hooks
+- `src/router.ts` budget router and role router
+- `src/catalog.ts` catalog fetch + cache
+- `src/usage.ts` windows, alerts, pre-flight guard
+- `src/commands.ts` `/tokens *`
+- `src/errors.ts` error classifier
 
-- `tokens.bd` — OpenAI Chat Completions (default).
-- `tokens.bd-responses` — OpenAI Responses; for tools that want `wire_api = "responses"` (Codex-style).
-- `tokens.bd-messages` — Anthropic Messages; `cache_control` reaches the provider, enabling explicit prompt caching on Anthropic-speaking upstreams.
+Verify: `scripts/verify.sh` = `tsc --noEmit` plus a live `pi --list-models` check.
 
-The `/tokens suggest` command and ladders remain on `tokens.bd`. The variants share the same auth, pricing, catalog and ladder order; only the request format differs.
+## Known limits
 
-## Footer widget
-
-Balance + percent. Refresh 60s.
-
-```
-tokens.bd: $12.50 | 26% used
-```
-
-Warns at 75%, 90%, and 100% of any window (once per threshold per reset) and <$1 wallet.
-
-## Ladder
-
-Order: derived from live catalog. Price: `https://tokens.bd/api/models`.
-
-Registers `tokens.bd/fast|coder|reasoner|long-context|private|research` + `auto` (= `fast`). `/model` to pick. First model in list wins. Retry steps down.
-
-Retry only quota/5xx (`rate_limited`, `rate_limit_exceeded`, `upstream_*`, `model_limit_reached`, context overflow). Auth/billing/spend-cap/input fail fast.
-
-Algorithm derives roles at startup. Override: write `~/.pi/agent/tokens-ladder.json`. One role by env:
-
-```bash
-export TOKENS_CODER="id1,id2"
-```
-
-## Scoped models
-
-`/scoped-models` — `Ctrl+P` cycles cheap models only. Free for routine, manual switch for hard.
-
-## Skill
-
-`tokens-bd` skill ships. Loads on cost/usage topics. Codemode recipes inside.
-
-## Plan template
-
-``/tokens count` mode under `/tokens` root — count input_tokens without inference; not billed.
-
-## Usage history
-
-`tokens-usage` session entries every 60s. `/tokens history` trend. `TOKENS_DAILY_BUDGET` warns daily spend.
-
-## Update
-
-```bash
-pi update
-```
-
-Reinstall:
-
-```bash
-pi remove git:github.com/ashik-maybe/tokens.bd-adapter-for-pi.dev
-pi install git:github.com/ashik-maybe/tokens.bd-adapter-for-pi.dev
-```
-
-## Uninstall
-
-```bash
-pi remove git:github.com/ashik-maybe/tokens.bd-adapter-for-pi.dev
-```
-
-Removes `settings.json` declaration. Pi cleans extension files.
-
-## Troubleshooting
-
-### No models
-
-Key allow-list, or plan/wallet covers nothing. Check `GET https://tokens.bd/v1/models` (key) + billing page.
-
-### Invalid key
-
-Recopy (shown once). New key at dashboard. Env var: `echo $TOKENS_API_KEY`.
-
-### Rate limits
-
-60 req/min per account, all keys. Concurrency 10 with plan, 3 without. `window_exhausted` blocks. Monthly spend cap per key. Details: `docs/rate-limits`. `/tokens errors` full reference.
-
-### 402 / 403
-
-`insufficient_credits` / `no_funding`: top up or subscribe. `monthly_spend_cap_exceeded`: cap hit, other key or wait. `tier_permission_denied`: plan excludes model, upgrade or fund wallet.
-
-### Model ignores images/tools
-
-Model lacks vision/tool support. Gateway 400s or drops feature. Check [tokens.bd/models](https://tokens.bd/models).
-
-## Per-model costs (optional)
-
-Live prices load from `https://tokens.bd/api/models`. Bundled `costs.json` covers offline. Override via Pi `models.json` or `~/.pi/agent/tokens-costs.json` only. Footer + `/session` show cost. No cache price → billed at input price; adapter mirrors.
-
-## Offline catalog
-
-Cache in models store. One fetch → `/model` lists snapshot offline (`pi --offline`). Failed refresh never wipes.
-
-## Auth reuse
-
-All three providers share the same TOKENS_API_KEY. Auth order: runtime --api-key > stored > auth.json > env. Pi manages it.
-
-## One key per customer
-
-Create keys in the dashboard only; no key-management API exists. Cap a customer's key monthly (`USD`). Track spend, rotate, and revoke from dashboard.
-
-## Migration
-
-- From OpenAI: keep `openai-completions`-style code; change base URL and key. Streaming passes through unchanged. Cache: `/tokens count` first
-- From Anthropic: put code behind `tokens.bd-messages` (`https://tokens.bd`).
-- From OpenRouter: change base URL; route/model suffixes are dropped.
-
-## Size guards
-
-Pre-flight guard in `before_provider_request` approximates prompt size (chars/4)
-against the model's context window and notifies once per cooldown when usage
-exceeds 80%/95%. It never changes your request. If you want the exact number
-before or after a compact, `/tokens count --model <id> <text>` answers it.
-
-Overflow hint in `session_before_compact` (reason "overflow" only) nudges you
-toward `/tokens suggest` and `/compact` with a manual exact check.
-
-## BDT
-
-Server does not expose BDT balances or exchange rates. `/tokens status` prints USD only; BDT payer sees final amounts on checkout/dashboard.
-
-## Notes
-
-- Pi packages run with user permissions. Read source before install.
-- Key in `~/.pi/agent/auth.json`. Never commit.
-- No custom streaming; Pi SSE covers.
-- No hardcoded keys; native `/login` auth.
-- Dynamic catalog; key sees allowed models only.
+- Costs taken from live catalog at startup; bundled `costs.json` is fallback only.
+- Pi's `/login` is the auth path. `TOKENS_API_KEY` only when Pi can't open `/login`.
+- No BDT figures; `tokens.bd/status` shows USD only.
+- No auto-switch between weekly and monthly plans; router respects the plan you set.
+- Streaming and tools are handled by Pi, not duplicated here.
 
 ## Links
 
-- [tokens.bd docs](https://tokens.bd/docs)
-- [Pi packages](https://pi.dev/packages)
-- [Changelog](CHANGELOG.md)
+- [tokens.bd](https://tokens.bd) · [docs](https://tokens.bd/docs)
+- [pi packages](https://pi.dev/packages)
+- Changelog in [`CHANGELOG.md`](CHANGELOG.md)
