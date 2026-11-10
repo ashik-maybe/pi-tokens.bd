@@ -279,7 +279,7 @@ exceeds 80%/95%. It never changes your request. If you want the exact number
 before or after a compact, `/tokens count --model <id> <text>` answers it.
 
 Overflow hint in `session_before_compact` (reason "overflow" only) nudges you
-toward `/tokens-suggest` and `/compact` with a manual exact check.
+toward `/tokens suggest` and `/compact` with a manual exact check.
 
 ## BDT
 
