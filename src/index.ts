@@ -4,7 +4,9 @@ import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
   createProvider,
+  anthropicMessagesApi,
   openAICompletionsApi,
+  openAIResponsesApi,
   type Credential,
   type OAuthCredential,
   type ProviderAuthInteraction,
@@ -12,10 +14,15 @@ import {
 } from "@earendil-works/pi-ai/compat";
 
 const BASE_URL = "https://tokens.bd/v1";
+const MESSAGES_BASE_URL = "https://tokens.bd";
 const MODELS_URL = "https://tokens.bd/v1/models";
 const CATALOG_URL = "https://tokens.bd/api/models";
 const USAGE_URL = "https://tokens.bd/v1/tokens/usage";
+const COUNT_TOKENS_URL = "https://tokens.bd/v1/messages/count_tokens";
 const PROVIDER_ID = "tokens.bd";
+const PROVIDER_ID_RESPONSES = "tokens.bd-responses";
+const PROVIDER_ID_MESSAGES = "tokens.bd-messages";
+const PROVIDER_VERSION = "0.6.0";
 
 interface CostEntry {
   input: number;
@@ -30,6 +37,8 @@ interface CatalogModel {
   contextWindow: number;
   input: number;
   output: number;
+  cacheRead?: number;
+  cacheWrite?: number;
 }
 
 type LadderMap = Record<string, string[]>;
@@ -38,13 +47,17 @@ type LadderMap = Record<string, string[]>;
 // to `fast` for existing user configs; it has no reliable catalogue signal.
 const ALL_ROLES = ["fast", "coder", "reasoner", "long-context", "private", "research"] as const;
 
-const ROLE_THINKING_LEVELS: Record<string, string[]> = {
+// effort names follow OpenAI's (reasoning_effort) superset:
+// none, minimal, low, medium, high, xhigh, max. Provider support varies per model;
+// the gateway passes values through. Pi sends them in the request.
+type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+const ROLE_THINKING_LEVELS: Record<string, readonly ThinkingLevel[]> = {
   fast: ["low", "medium"],
-  coder: ["low", "medium", "high"],
-  reasoner: ["high"],
-  "long-context": ["medium", "high"],
+  coder: ["low", "medium", "high", "xhigh"],
+  reasoner: ["high", "xhigh", "max"],
+  "long-context": ["medium", "high", "xhigh"],
   private: ["low", "medium"],
-  research: ["medium", "high"],
+  research: ["medium", "high", "max"],
 };
 
 // Last live catalog + costs fetched during refreshModels. Used to derive
@@ -52,8 +65,13 @@ const ROLE_THINKING_LEVELS: Record<string, string[]> = {
 let lastCatalog: CatalogModel[] = [];
 let lastCosts: Record<string, CostEntry> = {};
 let lastCostSource = "none";
+let lastCostFetchedAt: Date | null = null;
+let lastRequestId: string | null = null;
+let lastRetryAfterSeconds: number | null = null;
+const usageAlertMemory = new Map<string, number>();
 
 const ERROR_MAP: Record<string, string> = {
+  free_limit_reached: "Plan usage windows used up. Wait for reset (shown in /tokens-status) or upgrade plan.",
   missing_api_key: "No API key. Run /login tokens.bd.",
   invalid_api_key: "Invalid API key. Recopy or create a new one.",
   key_inactive: "Key revoked or rotated. Use the current secret.",
@@ -169,6 +187,24 @@ async function resolveApiKey(ctx?: any): Promise<string | undefined> {
   return process.env.TOKENS_API_KEY || undefined;
 }
 
+// cache-read/write price fields differ across catalogue revisions. Read any
+// of them best-effort; missing fields fall back to input price as before.
+function cachePriceField(pricing: any, key: string): number {
+  const variants = [
+    key,
+    `${key}PerMillionUsd`,
+    `${key}PerMillion`,
+    `${key}PricePerMillionUsd`,
+    `${key}PricePerMillion`,
+    `${key === "cacheRead" ? "cache_read" : "cache_write"}_input_usd_per_million`,
+  ];
+  for (const variant of variants) {
+    const value = Number(pricing?.[variant]);
+    if (Number.isFinite(value)) return value;
+  }
+  return Number.NaN;
+}
+
 // Bundled costs.json is a fallback only. The live /api/models catalogue is
 // the source of truth for prices and context windows.
 function loadFallbackCosts(): Record<string, CostEntry> {
@@ -209,11 +245,15 @@ async function fetchCatalog(signal?: AbortSignal): Promise<CatalogModel[]> {
       const alias = String(m?.alias ?? "").trim();
       if (!alias || m?.isActive === false) continue;
       const pricing = m?.pricing ?? {};
+      const cacheRead = cachePriceField(pricing, "cacheRead");
+      const cacheWrite = cachePriceField(pricing, "cacheWrite");
       out.push({
         alias,
         contextWindow: num(m?.contextWindow, 0),
         input: num(pricing.inputPricePerMillionUsd, Number.NaN),
         output: num(pricing.outputPricePerMillionUsd, Number.NaN),
+        cacheRead: Number.isFinite(cacheRead) ? cacheRead : undefined,
+        cacheWrite: Number.isFinite(cacheWrite) ? cacheWrite : undefined,
       });
     }
     return out;
@@ -230,8 +270,8 @@ function buildCosts(catalog: CatalogModel[]): Record<string, CostEntry> {
     costs[m.alias] = {
       input: m.input,
       output: m.output,
-      cacheRead: m.input,
-      cacheWrite: m.input,
+      cacheRead: Number.isFinite(m.cacheRead ?? Number.NaN) ? (m.cacheRead as number) : m.input,
+      cacheWrite: Number.isFinite(m.cacheWrite ?? Number.NaN) ? (m.cacheWrite as number) : m.input,
       contextWindow: m.contextWindow || 128000,
     };
   }
@@ -302,6 +342,14 @@ async function fetchModelsRaw(apiKey: string, signal?: AbortSignal): Promise<any
   }
 }
 
+// Docs (choosing-a-model, checked October 2026) list these as always-on thinking
+// models. Detected from catalog description when present, otherwise by alias.
+const ALWAYS_THINKING_HINTS = [/kimi-?k3/i, /glm-?5\.3/i];
+function isAlwaysThinking(alias: string, description?: unknown): boolean {
+  if (description && /always.+(think|reason)/i.test(String(description))) return true;
+  return ALWAYS_THINKING_HINTS.some((re) => re.test(alias));
+}
+
 function num(value: unknown, fallback: number): number {
   const parsed = typeof value === "number" ? value : Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -316,7 +364,7 @@ function normalizeInput(value: unknown): ("text" | "image")[] {
   return ["text"];
 }
 
-function mapModels(models: any[], costs: Record<string, CostEntry>) {
+function mapModels(models: any[], costs: Record<string, CostEntry>, provider = PROVIDER_ID, baseUrl = BASE_URL) {
   const mapped: any[] = [];
   for (const raw of models) {
     const id = String(raw?.id ?? "").trim();
@@ -330,20 +378,25 @@ function mapModels(models: any[], costs: Record<string, CostEntry>) {
     const cacheWrite = cost.cacheWrite ? num(cost.cacheWrite, input) : input;
     const reasoning =
       raw.reasoning ?? raw.supports_reasoning ?? raw.supportsReasoning ?? raw.supports_reasoning_effort ?? false;
+    const alwaysThinking = isAlwaysThinking(id, raw?.description ?? raw?.about ?? raw?.notes);
     const inputModalities = raw.input ?? raw.modalities ?? raw.image ?? undefined;
     const model: Record<string, any> = {
       type: "chat",
       id,
       name: String(raw.name ?? id),
-      api: "openai-completions",
-      provider: PROVIDER_ID,
-      baseUrl: BASE_URL,
+      api: provider === PROVIDER_ID_MESSAGES ? "anthropic-messages" : provider === PROVIDER_ID_RESPONSES ? "openai-responses" : "openai-completions",
+      provider,
+      baseUrl,
       reasoning: Boolean(reasoning),
       input: normalizeInput(inputModalities),
       cost: { input, output, cacheRead, cacheWrite },
       contextWindow: num(raw.contextWindow ?? raw.context_window ?? raw.contextLength ?? cost.contextWindow, 128000),
       maxTokens: num(raw.maxTokens ?? raw.max_tokens ?? raw.max_output_tokens, 8192),
     };
+    if (alwaysThinking) {
+      model.reasoning = true;
+      model.thinkingLevelMap = { ...(typeof model.thinkingLevelMap === "object" ? model.thinkingLevelMap : {}), effort: "max" };
+    }
     if (raw.thinkingLevelMap && typeof raw.thinkingLevelMap === "object") model.thinkingLevelMap = raw.thinkingLevelMap;
     if (raw.inputLimits && typeof raw.inputLimits === "object") model.inputLimits = raw.inputLimits;
     if (raw.promptCache && typeof raw.promptCache === "object") model.promptCache = raw.promptCache;
@@ -360,7 +413,13 @@ function storedFallback(context: RefreshModelsContext): any[] {
   return [];
 }
 
-async function fetchNativeModels(context: RefreshModelsContext): Promise<any[]> {
+function providerApiAndBaseUrl(provider: string) {
+  if (provider === PROVIDER_ID_MESSAGES) return { api: anthropicMessagesApi(), baseUrl: MESSAGES_BASE_URL };
+  if (provider === PROVIDER_ID_RESPONSES) return { api: openAIResponsesApi(), baseUrl: BASE_URL };
+  return { api: openAICompletionsApi(), baseUrl: BASE_URL };
+}
+
+async function fetchNativeModels(context: RefreshModelsContext, provider = PROVIDER_ID): Promise<any[]> {
   const apiKey = extractApiKey(context.credential) ?? process.env.TOKENS_API_KEY;
   if (!apiKey) return storedFallback(context);
   const live = await fetchModelsRaw(apiKey, context.signal);
@@ -374,12 +433,15 @@ async function fetchNativeModels(context: RefreshModelsContext): Promise<any[]> 
     lastCatalog = catalog;
     lastCosts = buildCosts(catalog);
     lastCostSource = "tokens.bd/api/models";
+    lastCostFetchedAt = new Date();
   } else {
     lastCatalog = [];
     lastCosts = loadFallbackCosts();
     lastCostSource = "bundled costs.json";
+    lastCostFetchedAt = null;
   }
-  return mapModels(live, lastCosts);
+  const baseUrl = providerApiAndBaseUrl(provider).baseUrl;
+  return mapModels(live, lastCosts, provider, baseUrl);
 }
 
 // ---- ladder router retry policy ----
@@ -399,7 +461,6 @@ const RETRYABLE_CODES = new Set([
   "admission_error",
   "catalog_error",
   "usage_unavailable",
-  "model_limit_reached",
   "context_length_exceeded",
   "context_overflow",
   "context_length",
@@ -419,6 +480,8 @@ const NON_RETRYABLE_CODES = new Set([
   "outstanding_debt",
   "member_cap_reached",
   "window_exhausted",
+  "free_limit_reached",
+  "model_limit_reached",
   "invalid_request",
   "request_entity_too_large",
   "endpoint_not_supported_for_model",
@@ -427,16 +490,30 @@ const NON_RETRYABLE_CODES = new Set([
   "unsupported_endpoint",
 ]);
 
+// Extract the machine-readable code from a gateway error body. Both shapes
+// carry it: OpenAI-style `{"error":{"code":"..."}}` and Anthropic-style
+// `{"type":"error","error":{"type":"...","code":"..."}}`. Falls back to a
+// bare code-looking token or status digits in free text.
+function extractErrorCode(errorMessage: string): string | undefined {
+  const text = errorMessage ?? "";
+  const jsonMatch = text.match(/"code"\s*:\s*"([A-Za-z0-9_-]{2,64})"/);
+  if (jsonMatch) return jsonMatch[1].toLowerCase();
+  const altMatch = text.match(/\b(missing_api_key|invalid_api_key|key_inactive|key_expired|account_suspended|model_not_allowed_on_key|monthly_spend_cap_exceeded|tier_permission_denied|model_not_found|insufficient_credits|no_funding|outstanding_debt|member_cap_reached|rate_limited|concurrency_limit|window_exhausted|model_limit_reached|free_limit_reached|rate_limit_exceeded|upstream_unreachable|upstream_error|upstream_timeout|no_upstream_available|model_not_priced|model_not_available|request_entity_too_large|invalid_request|endpoint_not_supported_for_model|anthropic_protocol_disabled|lookup_failed|admission_error|catalog_error|usage_unavailable|unsupported_endpoint|context_length_exceeded|context_overflow)\b/i);
+  return altMatch ? altMatch[1].toLowerCase() : undefined;
+}
+
 function classifyFailure(errorMessage: string): "retryable" | "non_retryable" {
   const text = (errorMessage ?? "").toLowerCase();
-  for (const code of RETRYABLE_CODES) {
-    if (text.includes(code)) return "retryable";
-  }
-  for (const code of NON_RETRYABLE_CODES) {
-    if (text.includes(code)) return "non_retryable";
+  const code = extractErrorCode(text);
+  // Billing, auth and cap errors: retrying cannot fix them.
+  if (code && NON_RETRYABLE_CODES.has(code)) return "non_retryable";
+  // Known-transient upstream codes.
+  if (code && RETRYABLE_CODES.has(code)) return "retryable";
+  for (const retryable of RETRYABLE_CODES) {
+    if (text.includes(retryable)) return "retryable";
   }
   // tokens.bd bodies carry status numbers and/or ChatGPT-style codes.
-  const statusMatch = text.match(/\b(\d{3})\b/);
+  const statusMatch = text.match(/\b(4\d\d|5\d\d)\b/);
   const status = statusMatch ? Number(statusMatch[1]) : undefined;
   if (status === 429 || (status !== undefined && status >= 500)) return "retryable";
   if (status !== undefined && status >= 400 && status < 500) return "non_retryable";
@@ -446,11 +523,74 @@ function classifyFailure(errorMessage: string): "retryable" | "non_retryable" {
 }
 
 function errorHint(errorMessage: string): string {
+  const code = extractErrorCode(errorMessage ?? "");
+  if (code) {
+    const hint = ERROR_MAP[code];
+    if (hint) return hint;
+  }
   const text = (errorMessage ?? "").toLowerCase();
-  for (const [code, hint] of Object.entries(ERROR_MAP)) {
-    if (text.includes(code)) return hint;
+  for (const [mapped, hint] of Object.entries(ERROR_MAP)) {
+    if (text.includes(mapped)) return hint;
   }
   return errorMessage ? errorMessage.slice(0, 240) : "Request failed.";
+}
+
+// Early-warning usage alerts. Fires once per 75/90/100% threshold per
+// window per reset. Usage poll never re-notifies within the same reset window.
+const USAGE_ALERT_THRESHOLDS = [
+  { percent: 75, level: "info" as const, note: "75% used" },
+  { percent: 90, level: "warning" as const, note: "90% used — compact in Pi (/compact) or switch cheaper model" },
+  { percent: 100, level: "warning" as const, note: "window exhausted — expect 429 window_exhausted until reset" },
+];
+
+function checkUsageAlerts(usage: any, ui?: { notify?: (msg: string, level: string) => void }): void {
+  if (!usage) return;
+  for (const w of usage.windows ?? []) {
+    const label = String(w?.label ?? w?.type ?? "window");
+    const unit = String(w?.unit ?? "");
+    const resetsAt = String(w?.resetsAt ?? "");
+    const used = num(w?.used, 0);
+    const limit = num(w?.limit, 0);
+    const percent = num(w?.percentUsed, 0);
+    for (const threshold of USAGE_ALERT_THRESHOLDS) {
+      if (percent < threshold.percent) continue;
+      const key = `${w?.type ?? label}:${resetsAt}:${threshold.percent}`;
+      const previous = usageAlertMemory.get(key) ?? -1;
+      if (previous >= threshold.percent) continue;
+      usageAlertMemory.set(key, percent);
+      const msg = `tokens.bd: ${label} ${threshold.note} (${percent}% of ${limit}${unit ? ` ${unit}` : ""}, used ${used}, resets ${resetsAt || "unknown"})`;
+      try {
+        ui?.notify?.(msg, threshold.level);
+      } catch {
+        // swallow
+      }
+      break;
+    }
+  }
+}
+
+function humanTimeLeft(iso: string | undefined): string {
+  if (!iso) return "?";
+  const target = new Date(iso);
+  const diff = target.getTime() - Date.now();
+  if (!Number.isFinite(diff)) return iso;
+  if (diff <= 0) return "now";
+  const minutes = Math.round(diff / 60000);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${hours}h`;
+  return `${Math.round(hours / 24)}d`;
+}
+
+function formatWindow(w: any): string {
+  const label = String(w?.label ?? w?.type ?? "window");
+  const percent = num(w?.percentUsed, 0);
+  const used = num(w?.used, 0);
+  const limit = num(w?.limit, 0);
+  const remaining = w?.remaining !== undefined && w?.remaining !== null ? num(w.remaining, Math.max(0, limit - used)) : Math.max(0, limit - used);
+  const unit = String(w?.unit ?? "");
+  const timeLeft = humanTimeLeft(w?.resetsAt ?? "");
+  return `${label}: ${remaining} remaining of ${limit}${unit ? ` ${unit}` : ""} (${percent}%, used ${used}, resets in ${timeLeft})`;
 }
 
 function pickNextPhysical(ctx: any, ids: string[], skip?: string): any | null {
@@ -477,11 +617,13 @@ function routeForRole(role: string, request: any, ctx: any): any {
     if (classifyFailure(message) === "non_retryable") {
       // Fail fast: retrying another ladder step cannot fix auth, billing,
       // spend caps, or malformed input, and would only burn usage.
-      throw new Error(errorHint(message));
+      const suffix = lastRetryAfterSeconds !== null ? ` (Retry-After: ${lastRetryAfterSeconds}s)` : "";
+      throw new Error(errorHint(message) + suffix);
     }
     const next = pickNextPhysical(ctx, ids, failedId);
     if (next) return { model: next, thinkingLevel: request.thinkingLevel ?? sticky.thinkingLevel ?? "medium" };
-    throw new Error(`Ladder ${role} exhausted after ${failedId}. ${errorHint(message)}`);
+    const suffix = lastRetryAfterSeconds !== null ? ` (Retry-After: ${lastRetryAfterSeconds}s)` : "";
+    throw new Error(`Ladder ${role} exhausted after ${failedId}. ${errorHint(message)}${suffix}`);
   }
   if (request.reason !== "user" && sticky?.model) {
     return { model: sticky.model, thinkingLevel: sticky.thinkingLevel ?? request.thinkingLevel ?? "medium" };
@@ -493,7 +635,6 @@ function routeForRole(role: string, request: any, ctx: any): any {
 
 export default function (pi: ExtensionAPI) {
   let lastUsage: any = null;
-  let lastRequestId: string | null = null;
   let refreshTimer: ReturnType<typeof setInterval> | null = null;
 
   const refreshUsage = async (ctx: any) => {
@@ -513,15 +654,18 @@ export default function (pi: ExtensionAPI) {
         plan: lastUsage.plan,
         windows: lastUsage.windows,
       });
+      checkUsageAlerts(lastUsage, ctx?.ui);
     }
   };
 
-  // Native provider: Pi owns auth order, offline snapshot, SSE streaming,
+  // Native providers: Pi owns auth order, offline snapshot, SSE streaming,
   // and usage accounting. The extension owns discovery + costs + ladders.
-  const provider = createProvider({
-    id: PROVIDER_ID,
-    name: "Tokens.bd",
-    baseUrl: BASE_URL,
+  // Register all three wire protocols so users can pick the backend that
+  // matches their tool (completions / responses / messages).
+  const makeProvider = (id: string, name: string) => createProvider({
+    id,
+    name,
+    baseUrl: providerApiAndBaseUrl(id).baseUrl,
     auth: {
       apiKey: {
         name: "Tokens.bd API key",
@@ -555,10 +699,14 @@ export default function (pi: ExtensionAPI) {
       },
     },
     models: [],
-    fetchModels: fetchNativeModels,
-    api: openAICompletionsApi(),
+    fetchModels: (ctx) => fetchNativeModels(ctx, id),
+    api: providerApiAndBaseUrl(id).api,
   });
+
+  const provider = makeProvider(PROVIDER_ID, "Tokens.bd");
   pi.registerProvider(provider);
+  pi.registerProvider(makeProvider(PROVIDER_ID_RESPONSES, "Tokens.bd (Responses)"));
+  pi.registerProvider(makeProvider(PROVIDER_ID_MESSAGES, "Tokens.bd (Messages)"));
 
   // Ladder virtual models: Pi owns selection/store/sticky; extension owns
   // order. Order is derived from the live catalog at refresh time.
@@ -605,13 +753,28 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  pi.on("after_provider_response" as any, async (event: any, _ctx: any) => {
+  pi.on("after_provider_response" as any, async (event: any, ctx: any) => {
     try {
       const headers = event?.headers ?? {};
-      const id = headers["x-tokens-request-id"] ?? headers["X-Tokens-Request-Id"];
+      const id = headers["x-tokens-request-id"] ?? headers["X-Tokens-Request-Id"] ?? headers["x-request-id"];
       if (id) {
         lastRequestId = String(id);
         pi.events.emit("tokens:request-logged", { requestId: lastRequestId, status: event?.status });
+      }
+      const retryAfterRaw = headers["retry-after"] ?? headers["Retry-After"];
+      if (retryAfterRaw !== undefined && retryAfterRaw !== null) {
+        const parsed = Number(retryAfterRaw);
+        lastRetryAfterSeconds = Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+      }
+      // Notify on rate limit right here so it is visible during a run.
+      // Pi UI may swallow it outside an agent run; events always fire.
+      const status = event?.status;
+      if (status === 429 && retryAfterRaw !== undefined) {
+        try {
+          ctx?.ui?.notify?.(`tokens.bd 429 — wait ${retryAfterRaw}s (Retry-After). /tokens-status shows windows.`, "warning");
+        } catch {
+          // swallow: never break provider flow
+        }
       }
     } catch {
       // never break provider flow
@@ -641,9 +804,9 @@ export default function (pi: ExtensionAPI) {
         lines.push("Plan: pay-as-you-go");
       }
       for (const w of usage.windows ?? []) {
-        lines.push(`${w.label}: ${w.used}/${w.limit} ${w.unit} (${w.percentUsed}%) resets ${w.resetsAt}`);
+        lines.push(formatWindow(w));
       }
-      if (usage.wallet) lines.push(`Wallet: $${usage.wallet.balanceUsd.toFixed(2)}`);
+      if (usage.wallet && usage.wallet.balanceUsd !== null) lines.push(`Wallet: $${usage.wallet.balanceUsd.toFixed(2)} USD (BDT balance shown on dashboard only)`);
       if (usage.key?.monthlySpendCapUsd) lines.push(`Key cap: $${usage.key.monthlySpendCapUsd}/mo`);
       if (usage.key?.allowedModels) lines.push(`Allowed: ${usage.key.allowedModels.join(", ")}`);
       if (lastRequestId) lines.push(`Last request id: ${lastRequestId}`);
@@ -660,20 +823,65 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  pi.registerCommand("tokens-costs", {
-    description: "Show per-model costs (live catalog, bundled fallback)",
-    handler: async (_args: any, ctx: any) => {
-      const costs = effectiveCosts();
-      const entries = Object.entries(costs);
-      if (entries.length === 0) {
-        ctx.ui.notify("No costs loaded.", "warning");
+  pi.registerCommand("tokens-count", {
+    description: "Count input tokens for a text payload without sending it to the model (not billed)",
+    handler: async (args: any, ctx: any) => {
+      const parts = (args ?? []).map(String);
+      let modelArg: string | undefined;
+      const textParts: string[] = [];
+      for (const part of parts) {
+        if (part.startsWith("--model=")) {
+          modelArg = part.slice("--model=".length).trim();
+        } else if (part.startsWith("--model ")) {
+          modelArg = part.slice("--model ".length).trim();
+        } else {
+          textParts.push(part);
+        }
+      }
+      const text = textParts.join(" ").trim();
+      if (!text) {
+        ctx.ui.notify("Provide text. Example: /tokens-count --model deepseek/deepseek-v4.1-flash Explain idempotency.", "info");
         return;
       }
-      const lines = entries.map(([id, c]) =>
-        `${id}: in=$${c.input}/M out=$${c.output}/M ctx=${c.contextWindow}`
-      );
-      lines.unshift(`Source: ${lastCostSource}`);
-      ctx.ui.notify(lines.join("\n"), "info");
+      if (text.length > 8000) {
+        ctx.ui.notify("Text too large — split and retry.", "warning");
+        return;
+      }
+      const apiKey = await resolveApiKey(ctx);
+      if (!apiKey) {
+        ctx.ui.notify("Run /login tokens.bd first.", "warning");
+        return;
+      }
+      const currentModel = ctx?.model?.id ?? ctx?.currentModel?.id;
+      const model = modelArg?.trim()
+        || (currentModel && ctx?.modelRegistry?.find?.(PROVIDER_ID, currentModel) ? currentModel : undefined)
+        || Object.values(deriveLadder(lastCatalog) ?? {}).flat()[0];
+      if (!model) {
+        ctx.ui.notify("Missing model and live catalog empty. Pass: /tokens-count --model <id> <text>", "warning");
+        return;
+      }
+      try {
+        const res = await fetch(COUNT_TOKENS_URL, {
+          method: "POST",
+          headers: {
+            "x-api-key": apiKey,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ model, messages: [{ role: "user", content: text }] }),
+        });
+        const raw = await res.json().catch(() => undefined);
+        if (!res.ok) {
+          const code = String(raw?.error?.code ?? raw?.code ?? `HTTP ${res.status}`).toLowerCase();
+          const message = raw?.error?.message ?? raw?.message ?? "count failed";
+          ctx.ui.notify(`count failed: ${code} — ${message}`, "error");
+          return;
+        }
+        const inputTokens = Number(raw?.input_tokens ?? 0);
+        ctx.ui.notify(`${model}: input_tokens=${inputTokens} (not billed)`, "info");
+      } catch (err) {
+        ctx.ui.notify(`count failed: ${(err as Error).message || "(network)"}`, "error");
+      }
     },
   });
 
@@ -708,9 +916,12 @@ export default function (pi: ExtensionAPI) {
       const lines = models
         .map((m: any) => {
           const c = costs[m.id];
-          return c ? `${m.id}: in=$${c.input}/M out=$${c.output}/M ctx=${c.contextWindow}` : `${m.id}: (no cost data)`;
+          const always = isAlwaysThinking(String(m.id));
+          if (!c) return `${m.id}: (no cost data)${always ? " (always-on thinking)" : ""}`;
+          const note = always ? " (always-on thinking: effort=max)" : "";
+          return `${m.id}: in=$${c.input}/M out=$${c.output}/M cacheRead=$${c.cacheRead}/M ctx=${c.contextWindow}${note}`;
         })
-        .sort();
+        .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
       ctx.ui.notify(lines.join("\n"), "info");
     },
   });

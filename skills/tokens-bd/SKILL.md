@@ -5,12 +5,21 @@ description: Use tokens.bd provider features. Check usage before expensive tasks
 
 # Tokens.bd
 
-## Usage check
+## Count first, act later
 
-Before starting a long or expensive task, run `/tokens-status` to check:
-- Wallet balance (top up if < $1).
-- Usage window percent (compact if > 90%).
-- Key's monthly spend cap.
+`/tokens-count --model <id> <text>` counts input tokens for a payload without running inference. It never bills; do it before sizing `max_tokens`, checking context fit, and compacting when at 75% of a 5-hour window.
+
+Usage check:
+- Run `/tokens-status` before long tasks.
+- Watch `--model` virtual ladder pick; auto-escalates on 429/5xx within one step and escalates to the next ladder model on Retry-After hints.
+- Remaining/percentUsed/resetsAt show next reset time in plain text.
+- Live 90%/100% alerts fire once per window per reset, before a failure.
+- Take care of wallet alerts; Windows user
+
+```bash
+setx TOKENS_API_KEY "tok_live_..."
+```
+
 
 ## Model selection
 
@@ -24,11 +33,14 @@ Before starting a long or expensive task, run `/tokens-status` to check:
 
 ## Error handling
 
-- `insufficient_credits` / `no_funding`: top up or switch to a cheaper model.
-- `window_exhausted`: wait for reset or switch models.
-- `monthly_spend_cap_exceeded`: use another key or wait.
-- `rate_limited`: wait Retry-After seconds.
-- `concurrency_limit`: reduce parallelism.
+Typed codes parsed from `error.code` (OpenAI shape) or the Anthropic-shaped `code` field (Messages). Best-effort status digits; known 402-style billing errors fail fast; transient 429/5xx map to /try-another-model notes with Retry-After.
+
+- `insufficient_credits` / `no_funding`: top up or switch to a cheaper model. Retries would only burn usage.
+- `window_exhausted` / `free_limit_reached`: wait for reset (`/tokens-status`) or upgrade; do not loop on 429.
+- `monthly_spend_cap_exceeded`: another key or wait.
+- `rate_limited`: wait `Retry-After`; tool flow reduces parallelism.
+- `concurrency_limit`: wait 2 s or cap concurrency.
+- `/tokens-status` and `/tokens-errors` include the last `x-tokens-request-id` for support tickets.
 
 Run `/tokens-errors` for the full reference.
 
@@ -39,4 +51,4 @@ Run `/tokens-errors` for the full reference.
 - Use `/compact` after each phase to reduce context.
 - Check `/tokens-history` for spending trends.
 - Prices refresh automatically on startup. Edit `~/.pi/agent/tokens-costs.json` only to pin a price.
-- Keep global config stable for prompt cache reuse.
+- Keep stable global config for prompt cache reuse. See Prompt caching doc for prefix placement; breakpoints follow Anthropic rules.

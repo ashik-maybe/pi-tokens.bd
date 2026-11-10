@@ -128,10 +128,11 @@ Config instead of extension (extension registers `tokens.bd`):
 
 | Command           | Does                                    |
 | ----------------- | --------------------------------------- |
-| `/tokens-status`  | Plan, usage windows, wallet, key limits |
-| `/tokens-costs`   | Loaded per-model pricing                |
-| `/tokens-compare` | Models by cost                          |
+| `/tokens-status`  | Plan, windows with reset clock, wallet, key limits |
+| `/tokens-costs`   | Live costs; cache column; source shown |
+| `/tokens-compare` | Models by cost; always-on thinking flagged |
 | `/tokens-suggest` | Cheapest model, routine work            |
+| `/tokens-count`   | Count input_tokens without inference; not billed |
 | `/tokens-history` | 7-day usage                             |
 | `/tokens-errors`  | Error codes, fixes                      |
 
@@ -141,7 +142,17 @@ Config instead of extension (extension registers `tokens.bd`):
 - Tool calling: Pi OpenAI-compatible handler.
 - Streaming: Pi SSE handler.
 - Reasoning: `reasoning_effort` when catalog flags reasoning. Off until `/v1/models` exposes it.
-- Structured output: `response_format` passthrough.
+- Structured output: `response_format` passthrough (OpenAI Chat Completions).
+
+### Provider variants
+
+Three providers are registered. Pick `/model` by backend:
+
+- `tokens.bd` — OpenAI Chat Completions (default).
+- `tokens.bd-responses` — OpenAI Responses; for tools that want `wire_api = "responses"` (Codex-style).
+- `tokens.bd-messages` — Anthropic Messages; `cache_control` reaches the provider, enabling explicit prompt caching on Anthropic-speaking upstreams.
+
+The `/tokens-suggest` command and ladders remain on `tokens.bd`. The variants share the same auth, pricing, catalog and ladder order; only the request format differs.
 
 ## Footer widget
 
@@ -151,7 +162,7 @@ Balance + percent. Refresh 60s.
 tokens.bd: $12.50 | 26% used
 ```
 
-Warns at 90% window or <$1 wallet.
+Warns at 75%, 90%, and 100% of any window (once per reset) and <$1 wallet.
 
 ## Ladder
 
@@ -233,6 +244,14 @@ Live prices load from `https://tokens.bd/api/models`. Bundled `costs.json` cover
 ## Offline catalog
 
 Cache in models store. One fetch → `/model` lists snapshot offline (`pi --offline`). Failed refresh never wipes.
+
+## Auth reuse
+
+All providers share the same `TOKENS_API_KEY`. Auth order: runtime `--api-key` > stored > `auth.json` > env. Pi manages it.
+
+## BDT
+
+Server does not expose BDT balances or exchange rates. `/tokens-status` prints USD only; BDT payer sees final amounts on checkout/dashboard.
 
 ## Notes
 
