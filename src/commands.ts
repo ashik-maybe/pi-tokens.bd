@@ -18,6 +18,12 @@ import {
 import { extensionState } from "./state.js";
 import { ERROR_MAP } from "./errors.js";
 import { COUNT_TOKENS_URL } from "./config.js";
+import {
+  getRouterMode,
+  getRouterPlan,
+  setRouterMode,
+  setRouterPlan,
+} from "./router.js";
 
 export function registerTokensCommands(pi: any): void {
   const handlers = {
@@ -163,6 +169,30 @@ export function registerTokensCommands(pi: any): void {
       const cheapest = entries.sort((a: any, b: any) => a[1].input + a[1].output - (b[1].input + b[1].output))[0];
       ctx.ui.notify(`Cheapest: ${cheapest[0]} ($${cheapest[1].input}/M in, $${cheapest[1].output}/M out)`, "info");
     },
+
+    router: async (args: any, ctx: any) => {
+      const parts = (args ?? []).map(String);
+      const sub = (parts[0] ?? "status").toLowerCase();
+      try {
+        if (sub === "status") {
+          ctx?.ui?.notify?.(`Router: plan=${getRouterPlan()} mode=${getRouterMode()}`, "info");
+          return;
+        }
+        if (sub === "plan" && (parts[1] === "weekly" || parts[1] === "monthly")) {
+          setRouterPlan(parts[1] as any);
+          ctx?.ui?.notify?.(`Router: plan set to ${parts[1]}`, "info");
+          return;
+        }
+        if (sub === "mode" && (parts[1] === "auto" || parts[1] === "economy" || parts[1] === "hard")) {
+          setRouterMode(parts[1] as any);
+          ctx?.ui?.notify?.(`Router: mode set to ${parts[1]}`, "info");
+          return;
+        }
+        ctx?.ui?.notify?.("Usage: /tokens router status | plan weekly|monthly | mode auto|economy|hard", "info");
+      } catch (e) {
+        try { ctx?.ui?.notify?.(`Router: ${String(e)}`, "error"); } catch {}
+      }
+    },
   };
 
   const MODEL_ALIASES: [string, keyof typeof handlers][] = [
@@ -202,7 +232,7 @@ export function registerTokensCommands(pi: any): void {
   }
 
   pi.registerCommand("tokens", {
-    description: "Tokens.bd one-stop: /tokens (status|compare|suggest|count|history|errors)",
+    description: "Tokens.bd one-stop: /tokens (status|compare|suggest|count|history|errors|router)",
     handler: tokensRootHandler,
   });
 }

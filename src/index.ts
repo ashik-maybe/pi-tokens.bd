@@ -23,7 +23,7 @@ import {
   createSessionBeforeCompactHandler,
 } from "./usage.js";
 import { extensionState } from "./state.js";
-import { routeForRole } from "./router.js";
+import { routeForRole, registerVirtualRouter } from "./router.js";
 import { registerTokensCommands } from "./commands.js";
 
 export default function (pi: ExtensionAPI) {
@@ -99,6 +99,9 @@ export default function (pi: ExtensionAPI) {
       return routeForRole("fast", request, _ctx);
     },
   });
+
+  // Budget-aware router. Picks one model per request from the plan's allowlist.
+  registerVirtualRouter(piApi);
 
   // Session start poll + usage updates.
   let refreshTimer: ReturnType<typeof setInterval> | null = null;

@@ -4,4 +4,7 @@ export const extensionState = {
   lastRequestId: null as string | null,
   lastRetryAfterSeconds: null as number | null,
   lastUsage: null as any,
+  routerPlan: null as "weekly" | "monthly" | null,
+  routerMode: null as "auto" | "economy" | "hard" | null,
+  routerDisable: false as boolean,
 };
