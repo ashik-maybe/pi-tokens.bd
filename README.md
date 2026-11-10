@@ -26,13 +26,12 @@ Package layout:
 
 Commands:
 
-1. `/tokens-status` shows plan, usage windows, wallet, key limits.
-2. `/tokens-costs` shows loaded per-model pricing and its source.
-3. `/tokens-compare` compares available models by cost.
-4. `/tokens-suggest` suggests the cheapest model for routine work.
-5. `/tokens-history` shows 7-day usage history.
-6. `/tokens-errors` lists error codes and fixes.
-7. `/tokens-plan <goal>` plans a task by cost.
+1. `/tokens status` shows plan, usage windows, wallet, key limits.
+2. `/tokens compare` shows pricing, cache prices, source.
+3. `/tokens compare` compares available models by cost.
+4. `/tokens suggest` suggests the cheapest model for routine work.
+5. `/tokens history` shows 7-day usage history.
+6. `/tokens errors` lists error codes and fixes.
 8. `/scoped-models` limits model cycling to cheap models.
 
 Rules:
@@ -126,15 +125,16 @@ Config instead of extension (extension registers `tokens.bd`):
 
 ## Commands
 
-| Command           | Does                                    |
-| ----------------- | --------------------------------------- |
-| `/tokens-status`  | Plan, windows with reset clock, wallet, key limits |
-| `/tokens-costs`   | Live costs; cache column; source shown |
-| `/tokens-compare` | Models by cost; always-on thinking flagged |
-| `/tokens-suggest` | Cheapest model, routine work            |
-| `/tokens-count`   | Count input_tokens without inference; not billed |
-| `/tokens-history` | 7-day usage                             |
-| `/tokens-errors`  | Error codes, fixes                      |
+| Command           | Does                                     |
+| ----------------- | ---------------------------------------- |
+| `/tokens`         | Help; default mode = `/tokens status`    |
+| `/tokens status`  | Plan, windows with reset clock, wallet, key limits |
+| `/tokens compare` | Models by cost; cache column; always-on thinking flagged; source shown |
+| `/tokens suggest` | Cheapest model, routine work             |
+| `/tokens count`   | Count input_tokens without inference; not billed |
+| `/tokens history` | 7-day usage                              |
+| `/tokens errors`  | Error codes, fixes                       |
+| `/tokens-*`       | Deprecated shims; call through once-per-session with notice |
 
 ## Capabilities
 
@@ -152,7 +152,7 @@ Three providers are registered. Pick `/model` by backend:
 - `tokens.bd-responses` — OpenAI Responses; for tools that want `wire_api = "responses"` (Codex-style).
 - `tokens.bd-messages` — Anthropic Messages; `cache_control` reaches the provider, enabling explicit prompt caching on Anthropic-speaking upstreams.
 
-The `/tokens-suggest` command and ladders remain on `tokens.bd`. The variants share the same auth, pricing, catalog and ladder order; only the request format differs.
+The `/tokens suggest` command and ladders remain on `tokens.bd`. The variants share the same auth, pricing, catalog and ladder order; only the request format differs.
 
 ## Footer widget
 
@@ -188,11 +188,11 @@ export TOKENS_CODER="id1,id2"
 
 ## Plan template
 
-`/tokens-plan <goal>` — cost-aware task plan.
+``/tokens count` mode under `/tokens` root — count input_tokens without inference; not billed.
 
 ## Usage history
 
-`tokens-usage` session entries every 60s. `/tokens-history` trend. `TOKENS_DAILY_BUDGET` warns daily spend.
+`tokens-usage` session entries every 60s. `/tokens history` trend. `TOKENS_DAILY_BUDGET` warns daily spend.
 
 ## Update
 
@@ -227,7 +227,7 @@ Recopy (shown once). New key at dashboard. Env var: `echo $TOKENS_API_KEY`.
 
 ### Rate limits
 
-60 req/min per account, all keys. Concurrency 10 with plan, 3 without. `window_exhausted` blocks. Monthly spend cap per key. Details: `docs/rate-limits`. `/tokens-errors` full reference.
+60 req/min per account, all keys. Concurrency 10 with plan, 3 without. `window_exhausted` blocks. Monthly spend cap per key. Details: `docs/rate-limits`. `/tokens errors` full reference.
 
 ### 402 / 403
 
@@ -255,7 +255,7 @@ Create keys in the dashboard only; no key-management API exists. Cap a customer'
 
 ## Migration
 
-- From OpenAI: keep `openai-completions`-style code; change base URL and key. Streaming passes through unchanged.
+- From OpenAI: keep `openai-completions`-style code; change base URL and key. Streaming passes through unchanged. Cache: `/tokens count` first
 - From Anthropic: put code behind `tokens.bd-messages` (`https://tokens.bd`).
 - From OpenRouter: change base URL; route/model suffixes are dropped.
 
@@ -264,14 +264,14 @@ Create keys in the dashboard only; no key-management API exists. Cap a customer'
 Pre-flight guard in `before_provider_request` approximates prompt size (chars/4)
 against the model's context window and notifies once per cooldown when usage
 exceeds 80%/95%. It never changes your request. If you want the exact number
-before or after a compact, `/tokens-count --model <id> <text>` answers it.
+before or after a compact, `/tokens count --model <id> <text>` answers it.
 
 Overflow hint in `session_before_compact` (reason "overflow" only) nudges you
 toward `/tokens-suggest` and `/compact` with a manual exact check.
 
 ## BDT
 
-Server does not expose BDT balances or exchange rates. `/tokens-status` prints USD only; BDT payer sees final amounts on checkout/dashboard.
+Server does not expose BDT balances or exchange rates. `/tokens status` prints USD only; BDT payer sees final amounts on checkout/dashboard.
 
 ## Notes
 

@@ -13,7 +13,9 @@
 - Tolerant live catalog cache-read/write pricing: cache fields read if present, else billed at input price as before.
 - `/tokens-compare` shows cache column; flags always-on thinking models (K3/GLM-5.3).
 - `ROLE_THINKING_LEVELS` extended (`xhigh`, `max`); effort superset documented as provider-dependent.
-- `/tokens-costs` prints `cacheRead` and whether prices came from live fetch or bundled fallback.
+- `/tokens compare` prints `Source: <live|bundled>` so readers see whether prices came from live fetch or bundled fallback (no separate `/tokens-costs` command).
+- Consolidated six `tokens-*` commands into one `/tokens <mode>` root (`status|compare|suggest|count|history|errors`); legacy `/tokens-*` names are deprecated shims calling through with once-per-session notice.
+- `/tokens-plan` claim removed (never registered).
 
 ### Changed
 

@@ -870,9 +870,9 @@ export default function (pi: ExtensionAPI) {
   });
 
   // Commands: Pi defaults cover /model, /login, /scoped-models.
-  pi.registerCommand("tokens-status", {
-    description: "Show tokens.bd plan, usage, wallet, and key limits",
-    handler: async (_args: any, ctx: any) => {
+  // Consolidates six /tokens-* into one /tokens <mode> root; old names kept as deprecated shims.
+  const handlers = {
+    status: async (_args: any, ctx: any) => {
       const apiKey = await resolveApiKey(ctx);
       if (!apiKey) {
         ctx.ui.notify("Run /login tokens.bd first.", "warning");
@@ -900,20 +900,12 @@ export default function (pi: ExtensionAPI) {
       if (lastRequestId) lines.push(`Last request id: ${lastRequestId}`);
       ctx.ui.notify(lines.join("\n"), "info");
     },
-  });
-
-  pi.registerCommand("tokens-errors", {
-    description: "List tokens.bd error codes and fixes",
-    handler: async (_args: any, ctx: any) => {
+    errors: async (_args: any, ctx: any) => {
       const lines = Object.entries(ERROR_MAP).map(([code, msg]) => `${code}: ${msg}`);
       if (lastRequestId) lines.unshift(`Last request id: ${lastRequestId}`);
       ctx.ui.notify(lines.join("\n"), "info");
     },
-  });
-
-  pi.registerCommand("tokens-count", {
-    description: "Count input tokens for a text payload without sending it to the model (not billed)",
-    handler: async (args: any, ctx: any) => {
+    count: async (args: any, ctx: any) => {
       const parts = (args ?? []).map(String);
       let modelArg: string | undefined;
       const textParts: string[] = [];
@@ -971,11 +963,7 @@ export default function (pi: ExtensionAPI) {
         ctx.ui.notify(`count failed: ${(err as Error).message || "(network)"}`, "error");
       }
     },
-  });
-
-  pi.registerCommand("tokens-history", {
-    description: "Show 7-day usage history",
-    handler: async (_args: any, ctx: any) => {
+    history: async (_args: any, ctx: any) => {
       const branch = ctx.sessionManager.getBranch();
       const entries = branch.filter((e: any) => e.type === "custom" && e.customType === "tokens-usage");
       if (entries.length === 0) {
@@ -989,11 +977,7 @@ export default function (pi: ExtensionAPI) {
       });
       ctx.ui.notify(lines.join("\n"), "info");
     },
-  });
-
-  pi.registerCommand("tokens-compare", {
-    description: "Compare available models by cost",
-    handler: async (_args: any, ctx: any) => {
+    compare: async (_args: any, ctx: any) => {
       const apiKey = await resolveApiKey(ctx);
       if (!apiKey) {
         ctx.ui.notify("Run /login tokens.bd first.", "warning");
@@ -1010,13 +994,10 @@ export default function (pi: ExtensionAPI) {
           return `${m.id}: in=$${c.input}/M out=$${c.output}/M cacheRead=$${c.cacheRead}/M ctx=${c.contextWindow}${note}`;
         })
         .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+      if (lastCostSource) lines.unshift(`Source: ${lastCostSource}`);
       ctx.ui.notify(lines.join("\n"), "info");
     },
-  });
-
-  pi.registerCommand("tokens-suggest", {
-    description: "Suggest cheapest model for routine work",
-    handler: async (_args: any, ctx: any) => {
+    suggest: async (_args: any, ctx: any) => {
       const costs = effectiveCosts();
       const entries = Object.entries(costs);
       if (entries.length === 0) {
@@ -1026,5 +1007,47 @@ export default function (pi: ExtensionAPI) {
       const cheapest = entries.sort((a: any, b: any) => a[1].input + a[1].output - (b[1].input + b[1].output))[0];
       ctx.ui.notify(`Cheapest: ${cheapest[0]} ($${cheapest[1].input}/M in, $${cheapest[1].output}/M out)`, "info");
     },
+  };
+
+  // Deprecation shim: once-per-name notice, call through.
+  const MODEL_ALIASES: [string, keyof typeof handlers][] = [
+    ["tokens-status", "status"],
+    ["tokens-errors", "errors"],
+    ["tokens-count", "count"],
+    ["tokens-history", "history"],
+    ["tokens-compare", "compare"],
+    ["tokens-suggest", "suggest"],
+  ];
+
+  const deprecationWarned = new Set<string>();
+  for (const [oldName, key] of MODEL_ALIASES) {
+    pi.registerCommand(oldName, {
+      description: `Deprecated alias of /tokens ${key}; will call through`,
+      handler: async (args: any, ctx: any) => {
+        if (!deprecationWarned.has(oldName)) {
+          deprecationWarned.add(oldName);
+          try { ctx?.ui?.notify?.(`/${oldName} is deprecated; use /tokens ${key}`, "warning"); } catch {}
+        }
+        return handlers[key](args, ctx);
+      },
+    });
+  }
+
+  function tokensRootHandler(args: any, ctx: any): Promise<void> {
+    const raw: string = Array.isArray(args) ? args.join(" ") : String(args ?? "");
+    const parts = raw.trim().split(/\s+/).filter(Boolean);
+    const mode = (parts[0] ?? "status").toLowerCase();
+    const h = (handlers as any)[mode];
+    if (typeof h !== "function") {
+      const names = Object.keys(handlers).join(", ");
+      try { ctx?.ui?.notify?.(`Usage: /tokens [${names}]`, "info"); } catch {}
+      return Promise.resolve();
+    }
+    return h(parts.slice(1), ctx);
+  }
+
+  pi.registerCommand("tokens", {
+    description: "Tokens.bd one-stop: /tokens (status|compare|suggest|count|history|errors)",
+    handler: tokensRootHandler,
   });
 }
