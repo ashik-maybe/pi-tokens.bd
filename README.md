@@ -162,7 +162,7 @@ Balance + percent. Refresh 60s.
 tokens.bd: $12.50 | 26% used
 ```
 
-Warns at 75%, 90%, and 100% of any window (once per reset) and <$1 wallet.
+Warns at 75%, 90%, and 100% of any window (once per threshold per reset) and <$1 wallet.
 
 ## Ladder
 
@@ -247,7 +247,17 @@ Cache in models store. One fetch → `/model` lists snapshot offline (`pi --offl
 
 ## Auth reuse
 
-All providers share the same `TOKENS_API_KEY`. Auth order: runtime `--api-key` > stored > `auth.json` > env. Pi manages it.
+All three providers share the same TOKENS_API_KEY. Auth order: runtime --api-key > stored > auth.json > env. Pi manages it.
+
+## One key per customer
+
+Create keys in the dashboard only; no key-management API exists. Cap a customer's key monthly (`USD`). Track spend, rotate, and revoke from dashboard.
+
+## Migration
+
+- From OpenAI: keep `openai-completions`-style code; change base URL and key. Streaming passes through unchanged.
+- From Anthropic: put code behind `tokens.bd-messages` (`https://tokens.bd`).
+- From OpenRouter: change base URL; route/model suffixes are dropped.
 
 ## BDT
 

@@ -19,6 +19,11 @@
 
 - Removed duplicate module-scope shadow of `lastRequestId`; single source now feeds `/tokens-status` and `/tokens-errors`.
 
+### Docs
+
+- README gains provider-variant notes, one-key-per-customer guidance, migration cheatsheet, BDT note.
+- SKILL.md gains count/retry guidance for cached/reasoning sessions and Windows key-export reminder.
+
 ## [0.5.0] - 2026-11-10
 
 - Declare host-provided Pi packages (`@earendil-works/pi-coding-agent`, `@earendil-works/pi-ai`) as `peerDependencies` with `"*"` range. Pi supplies them at runtime.
