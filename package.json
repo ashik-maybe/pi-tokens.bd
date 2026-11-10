@@ -8,8 +8,6 @@
   "license": "MIT",
   "files": [
     "src",
-    "skills",
-    "prompts",
     "costs.json"
   ],
   "keywords": ["pi", "pi-package", "pi-extension", "tokens.bd", "provider"],
@@ -19,8 +17,6 @@
   },
   "pi": {
     "extensions": ["./src/index.ts"],
-    "skills": ["./skills"],
-    "prompts": ["./prompts/*.md"],
     "changelogPath": "./CHANGELOG.md"
   },
   "dependencies": {}
