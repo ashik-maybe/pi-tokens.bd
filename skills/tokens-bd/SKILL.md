@@ -14,7 +14,7 @@ Usage check:
 - Watch `--model` virtual ladder pick; auto-escalates on 429/5xx within one step and escalates to the next ladder model on Retry-After hints.
 - Remaining/percentUsed/resetsAt show next reset time in plain text.
 - Live 90%/100% alerts fire once per window per reset, before a failure.
-- Take care of wallet alerts; Windows user
+- Pre-flight guard in `before_provider_request` warns at 80%/95% of context once per 60 s. If it fires, use `/tokens-count --model <id> <text>` for the exact count (not billed).
 
 ```bash
 setx TOKENS_API_KEY "tok_live_..."

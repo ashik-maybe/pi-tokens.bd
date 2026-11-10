@@ -537,6 +537,45 @@ function errorHint(errorMessage: string): string {
 
 // Early-warning usage alerts. Fires once per 75/90/100% threshold per
 // window per reset. Usage poll never re-notifies within the same reset window.
+// Pre-flight size guard. Estimates prompt size from chars/4 like tokens.bd's
+// own admission check does. Not a token count; see /v1/messages/count_tokens.
+// Only notifies; never mutates the payload or blocks the request.
+const PREFLIGHT_WARN_AT = 0.80;
+const PREFLIGHT_STRICT_AT = 0.95;
+const PREFLIGHT_COOLDOWN_MS = 60_000;
+let lastPreflightWarn = 0;
+
+function roughPromptTokens(payload: unknown): number {
+  try {
+    return Math.ceil(JSON.stringify(payload).length / 4);
+  } catch {
+    return 0;
+  }
+}
+
+// Rough model ceiling from id strings. Prefer explicit catalog/Pi values when present.
+const CONTEXT_HINTS: Record<string, number> = {
+  "kimi-k3": 1_000_000,
+  "glm-5.3": 1_000_000,
+  "deepseek/deepseek-v4.1-flash": 1_000_000,
+  "deepseek/deepseek-v4-pro-latest": 1_000_000,
+};
+
+function guessContextCap(modelIdHint: string | undefined): number {
+  const hint = String(modelIdHint ?? "").toLowerCase();
+  if (!hint) return 1_048_576;
+  const direct = CONTEXT_HINTS[hint];
+  if (direct) return direct;
+  if (hint.includes("codex") || hint.includes("response")) return 400_000;
+  if (hint.includes("kimi")) return 1_000_000;
+  if (hint.includes("gemini")) return 1_000_000;
+  return 128_000;
+}
+
+// Compact-overflow hint. One fire per overflow, 120 s cooldown.
+let lastCompactOverflowHint = 0;
+const COMPACT_OVERFLOW_COOLDOWN_MS = 120_000;
+
 const USAGE_ALERT_THRESHOLDS = [
   { percent: 75, level: "info" as const, note: "75% used" },
   { percent: 90, level: "warning" as const, note: "90% used — compact in Pi (/compact) or switch cheaper model" },
@@ -778,6 +817,55 @@ export default function (pi: ExtensionAPI) {
       }
     } catch {
       // never break provider flow
+    }
+  });
+
+  // Pre-flight size guard. Runs once per request; never blocks; safe if payload
+  // is one half of a websocket turn. Pi stores last window; we just warn.
+  pi.on("before_provider_request", async (event: any, ctx: any) => {
+    try {
+      const payload = event?.payload;
+      if (payload === undefined || typeof payload !== "object") return undefined;
+      const chars = JSON.stringify(payload).length;
+      const approxTokens = roughPromptTokens(payload);
+      const hint = String(payload.model ?? ctx?.model?.id ?? "").toLowerCase();
+      const piContext = Number(ctx?.model?.contextWindow ?? 0);
+      const cap = piContext > 8192 ? piContext : guessContextCap(hint);
+      const strict = cap * PREFLIGHT_STRICT_AT;
+      const warn = cap * PREFLIGHT_WARN_AT;
+      if (approxTokens >= strict) {
+        if (Date.now() - lastPreflightWarn >= PREFLIGHT_COOLDOWN_MS) {
+          lastPreflightWarn = Date.now();
+          const line = `tokens.bd preflight: ~${approxTokens.toLocaleString()} tokens vs context ${cap.toLocaleString()} on ${hint || "current model"}. Compact NOW (/compact) or drop large files from context.`;
+          try { pi.events.emit("tokens:preflight-warn", { approxTokens, cap, hint }); } catch {}
+          try { ctx?.ui?.notify?.(line, "warning"); } catch {}
+        }
+      } else if (approxTokens >= warn) {
+        if (Date.now() - lastPreflightWarn >= PREFLIGHT_COOLDOWN_MS) {
+          lastPreflightWarn = Date.now();
+          const line = `tokens.bd preflight: ~${approxTokens.toLocaleString()} of ${cap.toLocaleString()} context used. /tokens-count --model ${hint || "<id>"} for exact count (not billed).`;
+          try { pi.events.emit("tokens:preflight-watch", { approxTokens, cap, hint }); } catch {}
+          try { ctx?.ui?.notify?.(line, "info"); } catch {}
+        }
+      }
+      return undefined;
+    } catch {
+      return undefined; // never break provider flow
+    }
+  });
+
+  // Compact-overflow hint. Surfaces the cheapest ladder model and a pointer
+  // to /tokens-count for exact sizing. Never overrides compaction itself.
+  pi.on("session_before_compact", async (event: any, ctx: any) => {
+    try {
+      if (event?.reason !== "overflow") return undefined;
+      if (Date.now() - lastCompactOverflowHint < COMPACT_OVERFLOW_COOLDOWN_MS) return undefined;
+      lastCompactOverflowHint = Date.now();
+      try { ctx?.ui?.notify?.("tokens.bd overflow: choose /tokens-suggest and confirm /compact; exact count needs /tokens-count --model <id>.", "warning"); } catch {}
+      try { pi.events.emit("tokens:compact-overflow", { reason: "overflow", willRetry: event?.willRetry ?? false, tokensBefore: event?.preparation?.tokensBefore }); } catch {}
+      return undefined;
+    } catch {
+      return undefined;
     }
   });
 

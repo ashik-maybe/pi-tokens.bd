@@ -259,6 +259,16 @@ Create keys in the dashboard only; no key-management API exists. Cap a customer'
 - From Anthropic: put code behind `tokens.bd-messages` (`https://tokens.bd`).
 - From OpenRouter: change base URL; route/model suffixes are dropped.
 
+## Size guards
+
+Pre-flight guard in `before_provider_request` approximates prompt size (chars/4)
+against the model's context window and notifies once per cooldown when usage
+exceeds 80%/95%. It never changes your request. If you want the exact number
+before or after a compact, `/tokens-count --model <id> <text>` answers it.
+
+Overflow hint in `session_before_compact` (reason "overflow" only) nudges you
+toward `/tokens-suggest` and `/compact` with a manual exact check.
+
 ## BDT
 
 Server does not expose BDT balances or exchange rates. `/tokens-status` prints USD only; BDT payer sees final amounts on checkout/dashboard.
