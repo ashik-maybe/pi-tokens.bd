@@ -3,7 +3,6 @@
 // `{"type":"error","error":{"type":"...","code":"..."}}`.
 
 export const ERROR_MAP: Record<string, string> = {
-  free_limit_reached: "Plan usage windows used up. Wait for reset (shown in /tokens status) or upgrade plan.",
   missing_api_key: "No API key. Run /login tokens.bd.",
   invalid_api_key: "Invalid API key. Recopy or create a new one.",
   key_inactive: "Key revoked or rotated. Use the current secret.",
@@ -59,7 +58,6 @@ const RETRYABLE_CODES = new Set([
   "usage_unavailable",
   "context_length_exceeded",
   "context_overflow",
-  "context_length",
 ]);
 
 const NON_RETRYABLE_CODES = new Set([
@@ -76,7 +74,6 @@ const NON_RETRYABLE_CODES = new Set([
   "outstanding_debt",
   "member_cap_reached",
   "window_exhausted",
-  "free_limit_reached",
   "model_limit_reached",
   "invalid_request",
   "request_entity_too_large",
@@ -94,7 +91,7 @@ export function extractErrorCode(errorMessage: string): string | undefined {
   const text = errorMessage ?? "";
   const jsonMatch = text.match(/"code"\s*:\s*"([A-Za-z0-9_-]{2,64})"/);
   if (jsonMatch) return jsonMatch[1].toLowerCase();
-  const altMatch = text.match(/\b(missing_api_key|invalid_api_key|key_inactive|key_expired|account_suspended|model_not_allowed_on_key|monthly_spend_cap_exceeded|tier_permission_denied|model_not_found|insufficient_credits|no_funding|outstanding_debt|member_cap_reached|rate_limited|concurrency_limit|window_exhausted|model_limit_reached|free_limit_reached|rate_limit_exceeded|upstream_unreachable|upstream_error|upstream_timeout|no_upstream_available|model_not_priced|model_not_available|request_entity_too_large|invalid_request|endpoint_not_supported_for_model|anthropic_protocol_disabled|lookup_failed|admission_error|catalog_error|usage_unavailable|unsupported_endpoint|context_length_exceeded|context_overflow)\b/i);
+  const altMatch = text.match(/\b(missing_api_key|invalid_api_key|key_inactive|key_expired|account_suspended|model_not_allowed_on_key|monthly_spend_cap_exceeded|tier_permission_denied|model_not_found|insufficient_credits|no_funding|outstanding_debt|member_cap_reached|rate_limited|concurrency_limit|window_exhausted|model_limit_reached|rate_limit_exceeded|upstream_unreachable|upstream_error|upstream_timeout|no_upstream_available|model_not_priced|model_not_available|request_entity_too_large|invalid_request|endpoint_not_supported_for_model|anthropic_protocol_disabled|lookup_failed|admission_error|catalog_error|usage_unavailable|unsupported_endpoint|context_length_exceeded|context_overflow)\b/i);
   return altMatch ? altMatch[1].toLowerCase() : undefined;
 }
 
