@@ -10,6 +10,9 @@ import {
 import {
   extensionState,
 } from "./state.js";
+import {
+  getLastCatalog,
+} from "./catalog.js";
 
 export async function fetchUsage(apiKey: string): Promise<any | null> {
   try {
@@ -29,21 +32,20 @@ const COMPACT_OVERFLOW_COOLDOWN_MS = 120_000;
 let lastCompactOverflowHint = 0;
 let lastRequestIdLastSnapshot: string | null = null;
 
-export const CONTEXT_HINTS: Record<string, number> = {
-  "kimi-k3": 1_000_000,
-  "glm-5.3": 1_000_000,
-  "deepseek/deepseek-v4.1-flash": 1_000_000,
-  "deepseek/deepseek-v4-pro-latest": 1_000_000,
-};
-
+// Catalog-derived context cap: exact alias match first, then substring.
+// Falls back to 128k when the live catalog has nothing for this model.
 export function guessContextCap(modelIdHint: string | undefined): number {
   const hint = String(modelIdHint ?? "").toLowerCase();
-  if (!hint) return 1_048_576;
-  const direct = CONTEXT_HINTS[hint];
-  if (direct) return direct;
-  if (hint.includes("codex") || hint.includes("response")) return 400_000;
-  if (hint.includes("kimi")) return 1_000_000;
-  if (hint.includes("gemini")) return 1_000_000;
+  if (!hint) return 128_000;
+  const catalog = getLastCatalog();
+  for (const m of catalog) {
+    const alias = m.alias.toLowerCase();
+    if (alias === hint) return m.contextWindow || 128_000;
+  }
+  for (const m of catalog) {
+    const alias = m.alias.toLowerCase();
+    if (alias.includes(hint) || hint.includes(alias)) return m.contextWindow || 128_000;
+  }
   return 128_000;
 }
 

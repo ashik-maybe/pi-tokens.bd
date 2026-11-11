@@ -48,9 +48,6 @@ const RETRYABLE_CODES = new Set([
   "upstream_unreachable",
   "upstream_error",
   "upstream_timeout",
-  "no_upstream_available",
-  "model_not_priced",
-  "model_not_available",
   "upstream_auth_error",
   "lookup_failed",
   "admission_error",
@@ -75,6 +72,9 @@ const NON_RETRYABLE_CODES = new Set([
   "member_cap_reached",
   "window_exhausted",
   "model_limit_reached",
+  "no_upstream_available",
+  "model_not_priced",
+  "model_not_available",
   "invalid_request",
   "request_entity_too_large",
   "endpoint_not_supported_for_model",
@@ -106,9 +106,12 @@ export function classifyFailure(errorMessage: string): "retryable" | "non_retrya
     if (text.includes(retryable)) return "retryable";
   }
   // tokens.bd bodies carry status numbers and/or ChatGPT-style codes.
+  // Bare 429 without a machine-readable code: could be window_exhausted or
+  // model_limit_reached, which must not be retried in a loop. Fail fast.
   const statusMatch = text.match(/\b(4\d\d|5\d\d)\b/);
   const status = statusMatch ? Number(statusMatch[1]) : undefined;
-  if (status === 429 || (status !== undefined && status >= 500)) return "retryable";
+  if (status !== undefined && status >= 500) return "retryable";
+  if (status === 429) return "non_retryable";
   if (status !== undefined && status >= 400 && status < 500) return "non_retryable";
   // Unknown: never burn budget retrying a likely 4xx/billing error.
   if (text.includes("context")) return "retryable";
