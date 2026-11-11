@@ -42,6 +42,7 @@
 ### Docs
 
 - README gains provider-variant notes, one-key-per-customer guidance, migration cheatsheet, BDT note.
+- README overhaul — install/upgrade/uninstall, requirements, features, virtual models table, virtual-router hints, consolidated command reference (usage/catalog/recommend/control/diagnostics), dev lanes, known limits trimmed to essentials.
 - SKILL.md gains count/retry guidance for cached/reasoning sessions and Windows key-export reminder.
 
 ## [0.5.0] - 2026-11-10

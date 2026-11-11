@@ -1,12 +1,14 @@
-# Pi extension for Tokens.bd
+# Pi provider for Tokens.bd
 
-Pi extension. Adds [tokens.bd](https://tokens.bd) as a native provider. Dynamic catalog, usage widget, error mapping, optional router.
+One Pi extension that adds [tokens.bd](https://tokens.bd) as a native provider.
+Live catalog, role ladders, optional budget router, usage alerts — all wiring
+wired in minimal module lanes.
 
 ## Requirements
 
-- Pi (any recent 1.x). peer deps: `@earendil-works/pi-coding-agent` and `@earendil-works/pi-ai`
-- Tokens.bd account (api key starts `tok_live_`)
-- Network access
+- Pi (any recent 1.x). Peer deps: `@earendil-works/pi-coding-agent`, `@earendil-works/pi-ai`.
+- A [tokens.bd](https://tokens.bd) account with a `tok_live_...` API key.
+- Network access for the live model catalog and your key’s usage window.
 
 ## Install
 
@@ -16,111 +18,159 @@ Pin a tag:
 
     pi install git:github.com/ashik-maybe/tokens.bd-adapter-for-pi.dev@v0.5.0
 
-Try without keeping:
+Try without keeping it:
 
     pi -e git:github.com/ashik-maybe/tokens.bd-adapter-for-pi.dev
+
+Update:
+
+    pi update git:github.com/ashik-maybe/tokens.bd-adapter-for-pi.dev
 
 Uninstall:
 
     pi remove git:github.com/ashik-maybe/tokens.bd-adapter-for-pi.dev
 
-Or delete the cloned/copied folder. Pi auto-discovery rescans on next start.
+Or delete the clone. Pi rescans extensions on next launch, so no restart magic is needed.
 
 ## Setup
 
     pi
     /login tokens.bd
-    <paste tok_live_ key>
+    # paste tok_live_...
     /model
-    <pick tokens.bd/<model>>
-    <ctrl+s>  # save as default
+    # pick a tokens.bd/<model>
+    # Ctrl+S   — save as default
 
-Key lives in `~/.pi/agent/auth.json`. Never commit it.
+The key is stored in `~/.pi/agent/auth.json`. Never commit it to a repo.
 
-Headless alt:
+Headless/CI alternative:
 
     export TOKENS_API_KEY="tok_live_..."
     pi
 
-## Features
+## What ships
 
-- Auto catalog. Live pricing + model list on startup. Falls back to bundled `costs.json` offline.
-- Three provider variants. `tokens.bd` (chat completions) — `tokens.bd-responses` — `tokens.bd-messages`. Share the same key.
-- Role ladders. Alias models: `fast`, `coder`, `reasoner`, `long-context`, `private`, `research` — auto-rotated to cheapest available.
-- Virtual router. `tokens.bd/virtual-router` is opt-in and optional. Routes to the cheapest suitable allowlisted model for the current plan. Sticky on continuations; switches back at task boundary only.
-- Usage alerts. Panel on window consumption ≥75%, 90%, 100% and wallet <$1.
-- Retry safety. Quota / 5xx steps down ladder. Auth, billing, spend-cap, input errors fail fast.
+- **Three provider variants.** `tokens.bd` (Chat Completions), `tokens.bd-responses` (Responses API), `tokens.bd-messages` (Anthropic Messages, piped through for tool-style workflows). All share the same key.
+- **Live catalog.** Pricing and model list are fetched on startup from `https://tokens.bd/api/models`; bundled `costs.json` is the offline fallback.
+- **Role ladders.** `fast`, `coder`, `reasoner`, `long-context`, `private`, `research` pick the cheapest available model per role and step down on quota/5xx errors. `auto` is an alias to `fast`.
+- **Virtual router.** `tokens.bd/virtual-router` is an opt-in, plan-aware assistant. It picks one model per task from a narrow weekly/monthly allowlist and sticks to it on continuations. No auto-switch between plans. No premium fallback.
+- **Usage alerts.** 75/90/100% window-count warnings, plus a low-wallet alert below $1.
+- **Error mapping.** Quota/5xx step down the ladder; auth, billing, and input errors fail fast.
+- **Dynamic catalog tools.** Price/context-aware suggestions and ranking for budget-conscious users — see the `/tokens` commands below.
 
-## Virtual models registered
+## Virtual models
 
-| Model | Effect |
+| Model | Behavior |
 | --- | --- |
 | `tokens.bd/auto` | alias of `fast` |
-| `tokens.bd/fast` `coder` `reasoner` `long-context` `private` `research` | role ladders, price-ordered |
-| `tokens.bd/virtual-router` | opt-in budget router (see below) |
+| `tokens.bd/fast` `coder` `reasoner` `long-context` `private` `research` | price-ordered ladders |
+| `tokens.bd/virtual-router` | opt-in budget router (below) |
 
-Provider variants reuse the same physical ids. Pick `tokens.bd-messages/claude-haiku-5-5` to use the Messages endpoint, for example.
+Provider variants reuse the same physical model IDs. Pick
+`tokens.bd-responses/gpt-6-luna` or `tokens.bd-messages/claude-haiku-5-5` to use
+the corresponding endpoint flavor.
 
-## Budget router
+## Virtual router
 
-Select `tokens.bd/virtual-router` from `/model`. Defaults: weekly plan, auto mode. `/tokens router` subcommand toggles:
+Select `tokens.bd/virtual-router` from `/model`. Default: weekly plan, auto mode.
+Change with the `/tokens router` subcommand:
 
     /tokens router status
     /tokens router plan weekly     # or monthly
-    /tokens router mode auto       # economy|hard also accepted
+    /tokens router mode auto       # economy|hard
 
-Hints are positional: `[hard]` at the start of a message routes to the hard tier; `[cheap]` to the economy tier. Plain prompts land on the default balanced route. Reads `TOKENS_ROUTER_PLAN` and `TOKENS_ROUTER_MODE` env vars if set before launch.
+Hints at the start of a message pick a tier:
+
+| Hint | Result |
+| --- | --- |
+| `[cheap]` / `[economy]` | smallest affordable model |
+| `[balanced]` | default balanced route |
+| `[hard]` | strongest allowlisted model for the current plan |
+| `[review]` | reviewer-tier (monthly only) |
+
+Env overrides (set before launch):
+
+    TOKENS_ROUTER_PLAN=weekly TOKENS_ROUTER_MODE=economy pi
+
+The router reads your usage window and wallet, but it never fires an LLM call to decide — it’s rule-based, $0 classifier.
 
 ## Commands
 
+All under one root: `/tokens <subcommand>`.
+
+### Usage & billing
+
 | Command | Does |
 | --- | --- |
-| `/tokens` | help / default `/tokens status` |
-| `/tokens status` | plan, remaining windows, wallet, key limits |
-| `/tokens compare` | models by cost; cache column; thinking shown |
-| `/tokens suggest` | cheapest routine model |
-| `/tokens suggest-all [text]` | expanded pool: cheapest affordable model for the prompt |
-| `/tokens rank <text>` | top-10 list for the prompt, context-aware score |
-| `/tokens models` | all models the key can call, with price/context |
-| `/tokens count [--model <id>] <text>` | count prompt tokens; not billed |
-| `/tokens history [--graph]` | 7-day trend; `--graph` draws an ASCII sparkline |
-| `/tokens errors` | codes + fixes |
-| `/tokens health` | live catalog check; reports count + price context |
-| `/tokens forecast [--block $USD]` | projected monthly spend; optional soft cap latch |
-| `/tokens models --limit N [--cheap] [--count]` | cheapest N models; `--cheap` sorts by price; `--count` prints number only |
-| `/tokens rank [--cheap] <text>` | top-10 for the prompt (or cheapest-10 with `--cheap`); models tagged cheap/premium |
-| `/tokens compare [--compare-with <text>]` | price compare; with text shows top-10 cheapest cost for that input size |
-| `/tokens pin <model-id> [--session]` | save a pinned model locally; `--session` keeps it only for this session |
-| `/tokens history [--graph] [--by-model]` | trend chart or per-model usage counts |
-| `/tokens cost <text>` | cost estimate for the prompt via cheapest affordable model |
-| `/tokens explain <text>` | explain classifier verdict and picked model for the prompt |
-| `/tokens router status|plan|mode` | budget router toggles |
+| `/tokens status` | Plan, remaining windows, wallet USD, key limits |
+| `/tokens forecast [--block=N]` | Projected monthly spend; optional soft cap |
+| `/tokens history [--graph] [--by-model]` | 7‑day spend sparkline and frequency per model |
 
-Deprecated shims `/tokens-status`, `/tokens-compare`, etc. are still accepted; they warn once per session and call through.
+### Catalog & pricing
+
+| Command | Does |
+| --- | --- |
+| `/tokens models [--cheap] [--limit N] [--count]` | What your key can call, sorted by price by default |
+| `/tokens compare [--compare-with <text>]` | Side-by-side prices; with text, top-10 cheapest cost for that input size |
+| `/tokens health` | Live catalog check; reports count and per‑model cost/context |
+| `/tokens cost <text>` | Token estimate + total cost for the prompt |
+| `/tokens count [--model <id>] <text>` | Exact input-token count via the count-tokens endpoint; never billed |
+
+### Recommendations
+
+| Command | Does |
+| --- | --- |
+| `/tokens suggest` | cheapest affordable default |
+| `/tokens suggest-all <text>` | expanded pool, rule-based pick |
+| `/tokens rank <text>` | top-10 scoring list (adds `[cheap]`/`[premium]` tags) |
+| `/tokens explain <text>` | prints why the classifier picked the suggested model |
+
+### Control
+
+| Command | Does |
+| --- | --- |
+| `/tokens router status\|plan\|mode` | virtual‑router toggles |
+| `/tokens pin <model-id> [--session]` | pin a model locally; `--session` keeps it for this session only |
+
+### Diagnostics
+
+| Command | Does |
+| --- | --- |
+| `/tokens errors` | enumerated error codes + quick fixes |
+
+Deprecated shims `/tokens-status`, `/tokens-compare`, etc. still work — they warn once per session and forward to the consolidated command.
 
 ## Development
 
-Source under `src/`. Wiring in `index.ts`. Lane layout:
+Source tree (trim for the gist, not exhaustive):
 
-- `src/index.ts` wires providers, virtual models, hooks
-- `src/router.ts` budget router and role router
-- `src/catalog.ts` catalog fetch + cache
-- `src/usage.ts` windows, alerts, pre-flight guard
-- `src/commands.ts` `/tokens *`
-- `src/errors.ts` error classifier
+- `src/index.ts` — wiring only
+- `src/catalog.ts` — live catalog, costs, ladder derivation
+- `src/router.ts` — virtual router + role router
+- `src/dynamic-suggest.ts` — catalog-backed suggestion scoring
+- `src/usage.ts` — usage polling, alerts, pre‑flight guard
+- `src/commands.ts` — consolidated `/tokens` handler
+- `src/errors.ts` — error-code classifier
+- `src/errors.ts`, `src/state.ts`, `src/utils.ts`, `src/config.ts` — primitives
 
-Verify: `scripts/verify.sh` = `tsc --noEmit` plus a live `pi --list-models` check.
+Verify before committing:
+
+    ./scripts/verify.sh
+
+which is `tsc --noEmit` plus a load-time `--list-models` smoke test.
 
 ## Known limits
 
-- Costs taken from live catalog at startup; bundled `costs.json` is fallback only.
-- Pi's `/login` is the auth path. `TOKENS_API_KEY` only when Pi can't open `/login`.
-- No BDT figures; `tokens.bd/status` shows USD only.
-- No auto-switch between weekly and monthly plans; router respects the plan you set.
-- Streaming and tools are handled by Pi, not duplicated here.
+- Live costs/fetched model list may fail on startup; bundled `costs.json` takes over as a static fallback.
+- `/tokens` recommendations are rule-based; they do not call models and are neither latency nor quality guarantees.
+- `virtual-router` sticks to its allowlist on continuations and only switches on explicit user action (hint or task boundary); it never auto‑escalates to a premium tier.
+- `/tokens` BDT balances aren’t surfaced — USD only; full figures live on the dashboard.
+- The router scores from the catalog and the key’s allow-list; it does not know your inbox or session budget unless you opt in with `--block`.
+- Streaming, tool calling, and protocol specifics (SSE, `cache_control`, etc.) are delegated to Pi.
 
-## Links
+## License & docs
 
-- [tokens.bd](https://tokens.bd) · [docs](https://tokens.bd/docs)
-- [pi packages](https://pi.dev/packages)
-- Changelog in [`CHANGELOG.md`](CHANGELOG.md)
+MIT — see [`LICENSE`](LICENSE). Changelog lives in [`CHANGELOG.md`](CHANGELOG.md).
+
+- Tokens.bd: <https://tokens.bd> · docs: <https://tokens.bd/docs>
+- Pi packages: <https://pi.dev/packages>
