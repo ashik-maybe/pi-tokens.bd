@@ -17,6 +17,8 @@
 ### Removed
 
 - Bundled `costs.json` is dropped. The live `/api/models` catalogue is the sole source of truth. Offline/empty catalogue returns empty costs; price-aware commands print "No costs loaded"/empty results.
+- `/tokens pin` removed — it never changed routing. Use `/model`.
+- Pi-overlap trimming: pre-flight context guard (80/95% toast) replaced by pi's footer/auto-compaction; model-usage tally kept for `/tokens history --by-model`. The after-provider-response 429 toast and the overflow suggestion hook are dropped; pi's native compaction/retry own those paths.
 
 
 ### Added

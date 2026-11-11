@@ -1,4 +1,4 @@
-// Usage discovery, alerts and pre-flight/compaction guards.
+// Usage discovery, alerts and model-usage tracking.
 // Provides utilities the default-export wires into Pi hooks.
 
 import {
@@ -10,9 +10,6 @@ import {
 import {
   extensionState,
 } from "./state.js";
-import {
-  getLastCatalog,
-} from "./catalog.js";
 
 export async function fetchUsage(apiKey: string): Promise<any | null> {
   try {
@@ -21,38 +18,6 @@ export async function fetchUsage(apiKey: string): Promise<any | null> {
     return await res.json();
   } catch {
     return null;
-  }
-}
-
-export const PREFLIGHT_WARN_AT = 0.8;
-export const PREFLIGHT_STRICT_AT = 0.95;
-export const PREFLIGHT_COOLDOWN_MS = 60_000;
-let lastPreflightWarn = 0;
-const COMPACT_OVERFLOW_COOLDOWN_MS = 120_000;
-let lastCompactOverflowHint = 0;
-
-// Catalog-derived context cap: exact alias match first, then substring.
-// Falls back to 128k when the live catalog has nothing for this model.
-export function guessContextCap(modelIdHint: string | undefined): number {
-  const hint = String(modelIdHint ?? "").toLowerCase();
-  if (!hint) return 128_000;
-  const catalog = getLastCatalog();
-  for (const m of catalog) {
-    const alias = m.alias.toLowerCase();
-    if (alias === hint) return m.contextWindow || 128_000;
-  }
-  for (const m of catalog) {
-    const alias = m.alias.toLowerCase();
-    if (alias.includes(hint) || hint.includes(alias)) return m.contextWindow || 128_000;
-  }
-  return 128_000;
-}
-
-export function roughPromptTokens(payload: unknown): number {
-  try {
-    return Math.ceil(JSON.stringify(payload).length / 4);
-  } catch {
-    return 0;
   }
 }
 
@@ -171,47 +136,17 @@ export function projectedMonthlySpend(usage: any): number | null {
   return projected;
 }
 
-export function createBeforeProviderRequestHandler(piApi: any) {
+// Count model usage per session for `/tokens history --by-model`.
+// Pi's footer and auto-compaction own context pressure; this hook only tallies.
+export function createModelUsageTracker() {
   return async (event: any, ctx: any) => {
     try {
       const payload = event?.payload;
       if (payload === undefined || typeof payload !== "object") return undefined;
-      const approxTokens = roughPromptTokens(payload);
       const hint = String(payload.model ?? ctx?.model?.id ?? "").toLowerCase();
       if (hint) {
         extensionState.modelUsage[hint] = (extensionState.modelUsage[hint] ?? 0) + 1;
       }
-      const piCtx = Number(ctx?.model?.contextWindow ?? 0);
-      const cap = piCtx > 8192 ? piCtx : guessContextCap(hint);
-      const strict = cap * PREFLIGHT_STRICT_AT;
-      const warn = cap * PREFLIGHT_WARN_AT;
-      if (approxTokens >= strict || approxTokens >= warn) {
-        const strictCase = approxTokens >= strict;
-        if (Date.now() - lastPreflightWarn >= PREFLIGHT_COOLDOWN_MS) {
-          lastPreflightWarn = Date.now();
-          const line = strictCase
-            ? `tokens.bd preflight: ~${approxTokens.toLocaleString()} tokens vs context ${cap.toLocaleString()} on ${hint || "current model"}. Compact NOW (/compact) or drop large files from context.`
-            : `tokens.bd preflight: ~${approxTokens.toLocaleString()} of ${cap.toLocaleString()} context used. /tokens count --model ${hint || "<id>"} for exact count (not billed).`;
-          try { piApi.events.emit(strictCase ? "tokens:preflight-warn" : "tokens:preflight-watch", { approxTokens, cap, hint }); } catch {}
-          try { ctx?.ui?.notify?.(line, strictCase ? "warning" : "info"); } catch {}
-        }
-      }
-      return undefined;
-    } catch {
-      return undefined;
-    }
-  };
-}
-
-// Factory for session_before_compact handler. One hint per overflow per cooldown.
-export function createSessionBeforeCompactHandler(piApi: any) {
-  return async (event: any, ctx: any) => {
-    try {
-      if (event?.reason !== "overflow") return undefined;
-      if (Date.now() - lastCompactOverflowHint < COMPACT_OVERFLOW_COOLDOWN_MS) return undefined;
-      lastCompactOverflowHint = Date.now();
-      try { ctx?.ui?.notify?.("tokens.bd overflow: choose /tokens suggest and confirm /compact; exact count needs /tokens count --model <id>.", "warning"); } catch {}
-      try { piApi.events.emit("tokens:compact-overflow", { reason: "overflow", willRetry: event?.willRetry ?? false, tokensBefore: event?.preparation?.tokensBefore }); } catch {}
       return undefined;
     } catch {
       return undefined;

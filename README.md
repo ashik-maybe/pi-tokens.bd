@@ -24,7 +24,6 @@ Uninstall, fully:
 1. `pi remove git:github.com/ashik-maybe/pi-tokens.bd`
 2. `/logout` inside Pi (or delete the `tokens.bd` entry from `~/.pi/agent/auth.json`)
 3. Remove `TOKENS_API_KEY` from your shell profile if you set one
-4. Optional: delete `~/.pi/agent/pinned-model.json` (written by `/tokens pin`)
 
 Upgrading from ≤0.5.0: the bundled skill, prompts and `costs.json` were dropped in 0.6.0 — you get the extension only. Pricing comes from the live catalog; offline commands report `No costs loaded`.
 
@@ -153,7 +152,6 @@ One root: `/tokens <subcommand>`.
 | Command | Does |
 | --- | --- |
 | `/tokens router status|plan|mode` | virtual-router toggles |
-| `/tokens pin <model-id> [--session]` | records a pinned model (nothing applies it; use `/model` to switch) |
 
 ### Diagnostics
 
@@ -190,7 +188,6 @@ Verify before committing:
 - `virtual-router` only switch plans via explicit user action and never hands you a premium model by default.
 - Usage windows are polled every 60 s; alerts can lag a burst by up to a minute, and nothing is persisted until the numbers change.
 - Tokens.bd does not expose BDT balances/exchange rates; `/tokens status` prints USD only.
-- `/tokens pin` records a model id; it never changes what Pi routes. Use `/model`.
 - Streaming/tool calling/caching flags are delegated to Pi; the extension does not duplicate them.
 
 ## License & docs

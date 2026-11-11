@@ -3,10 +3,7 @@
 
 import {
   resolveApiKey,
-  agentDir,
 } from "./utils.js";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import {
   fetchModelsRaw,
   effectiveCosts,
@@ -400,28 +397,6 @@ export function registerTokensCommands(pi: any): void {
       ctx.ui.notify(`Ranked:\n${lines.join("\n")}`, "info");
     },
 
-    pin: async (args: any, ctx: any) => {
-      const parts = (args ?? []).map(String);
-      const sessionOnly = parts.includes("--session") || parts.includes("--only");
-      const modelId = parts.find((p: string) => !p.startsWith("--"));
-      if (!modelId) {
-        ctx?.ui?.notify?.("Usage: /tokens pin <model-id> [--session]", "warning");
-        return;
-      }
-      if (sessionOnly) {
-        ctx?.ui?.notify?.(`Pinned model noted for this session: ${modelId}. Nothing applies it automatically — switch with /model ${modelId}.`, "info");
-        return;
-      }
-      try {
-        const file = join(agentDir(), "pinned-model.json");
-        mkdirSync(agentDir(), { recursive: true });
-        writeFileSync(file, JSON.stringify({ model: modelId }), "utf8");
-        ctx?.ui?.notify?.(`Pinned model saved to ${file}, but nothing applies it — switch with /model ${modelId}.`, "info");
-      } catch (err) {
-        ctx?.ui?.notify?.(`Pin failed: ${String(err)}`, "error");
-      }
-    },
-
     cost: async (args: any, ctx: any) => {
       const parts = (args ?? []).map(String);
       const text = parts.join(" ").trim();
@@ -515,7 +490,7 @@ export function registerTokensCommands(pi: any): void {
   }
 
   pi.registerCommand("tokens", {
-    description: "Tokens.bd one-stop: /tokens (status|compare|suggest|count|history|errors|health|forecast|suggest-all|models|rank|pin|cost|explain|router)",
+    description: "Tokens.bd one-stop: /tokens (status|compare|suggest|count|history|errors|health|forecast|suggest-all|models|rank|cost|explain|router)",
     handler: tokensRootHandler,
   });
 }

@@ -19,8 +19,7 @@ import {
 } from "./catalog.js";
 import {
   refreshUsage as refreshUsageImpl,
-  createBeforeProviderRequestHandler,
-  createSessionBeforeCompactHandler,
+  createModelUsageTracker,
 } from "./usage.js";
 import { extensionState } from "./state.js";
 import { routeForRole, registerVirtualRouter } from "./router.js";
@@ -135,24 +134,13 @@ export default function (pi: ExtensionAPI) {
         const parsed = Number(retryAfterRaw);
         extensionState.lastRetryAfterSeconds = Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
       }
-      if (event?.status === 429) {
-        try {
-          const wait = extensionState.lastRetryAfterSeconds;
-          const hint = wait !== null ? `wait ${wait}s (Retry-After)` : "check /tokens status for the reset";
-          _ctx?.ui?.notify?.(`tokens.bd 429 — ${hint}.`, "warning");
-        } catch {
-          // swallow
-        }
-      }
     } catch {
       // swallow
     }
   });
 
-  // Pre-flight size guard
-  piApi.on("before_provider_request", createBeforeProviderRequestHandler(piApi));
-
-  piApi.on("session_before_compact", createSessionBeforeCompactHandler(piApi));
+  // Session model-usage tally for /tokens history --by-model
+  piApi.on("before_provider_request", createModelUsageTracker());
 
   registerTokensCommands(piApi);
 }
