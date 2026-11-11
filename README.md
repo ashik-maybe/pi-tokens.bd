@@ -1,4 +1,4 @@
-# Pi provider for Tokens.bd
+# pi-tokens.bd
 
 One Pi extension that wires [tokens.bd](https://tokens.bd) in as a native provider.
 Live catalog, role ladders, optional budget router, usage alerts — kept lean.
@@ -6,7 +6,7 @@ Live catalog, role ladders, optional budget router, usage alerts — kept lean.
 ## Requirements
 
 - Pi (any recent 1.x). Peer deps: `@earendil-works/pi-coding-agent`, `@earendil-works/pi-ai`.
-- A [tokens.bd](https://tokens.bd) account with a `tok_live_...` API key.
+- A [tokens.bd](https://tokens.bd) account with a `tok_live_...` API key (create one at <https://tokens.bd/dashboard/keys>).
 - Network access; catalog and usage are fetched at runtime.
 
 ## Install / update / remove
@@ -19,23 +19,33 @@ Or try it in-place without installing:
 
     pi -e git:github.com/ashik-maybe/pi-tokens.bd
 
-Deleting the clone uninstalls the provider; Pi rescans extensions on next launch.
+Uninstall, fully:
 
-## Setup
+1. `pi remove git:github.com/ashik-maybe/pi-tokens.bd`
+2. `/logout` inside Pi (or delete the `tokens.bd` entry from `~/.pi/agent/auth.json`)
+3. Remove `TOKENS_API_KEY` from your shell profile if you set one
+4. Optional: delete `~/.pi/agent/pinned-model.json` (written by `/tokens pin`)
+
+Upgrading from ≤0.5.0: the bundled skill, prompts and `costs.json` were dropped in 0.6.0 — you get the extension only. Pricing comes from the live catalog; offline commands report `No costs loaded`.
+
+## First run
 
     pi
-    /login tokens.bd
-    # paste tok_live_...
-    /model
-    # pick a tokens.bd/<model>
-    # Ctrl+S   — save as default
+    /login tokens.bd          # paste tok_live_...
+    /model tokens.bd/z-ai/glm-5.3-flash
+    /tokens status            # plan, windows, wallet
+    /tokens count --model z-ai/glm-5.3-flash Explain idempotency   # not billed
 
-Auth lives in `~/.pi/agent/auth.json`. Never commit it.
+To make a model the default, add `"defaultModel": "tokens.bd/<model-id>"` to `~/.pi/agent/settings.json` (`defaultModel` in the settings reference).
 
-Headless / CI alternative:
+## Authentication
 
-    export TOKENS_API_KEY="tok_live_..."
-    pi
+Two ways in, either works:
+
+- Interactive: `/login tokens.bd` — the key is stored by Pi in `~/.pi/agent/auth.json`. Never commit it.
+- Headless / CI: `export TOKENS_API_KEY="tok_live_..."` before launching pi.
+
+The extension asks Pi for the stored key first and falls back to `TOKENS_API_KEY`. Keys start with `tok_live_`; anything else is rejected at `/login`.
 
 ## What ships
 
@@ -43,7 +53,7 @@ Headless / CI alternative:
 - **Live catalog only.** Pricing and model names are fetched from `https://tokens.bd/api/models` on every launch. Offline, price-aware commands report an empty catalog.
 - **Role ladders.** `fast`, `coder`, `reasoner`, `long-context`, `private`, `research` pick the cheapest available model per role and step down on quota/5xx errors. `auto` is an alias to `fast`.
 - **Virtual router.** `tokens.bd/virtual-router` is an opt-in, plan-aware assistant. It picks one allowlisted model per task from the current plan and sticks to it on continuations. No plan switching. No premium fallback.
-- **Usage alerts.** 75 / 90 / 100% window-count warnings.
+- **Usage alerts.** 75 / 90 / 100% window-count warnings, checked every 60 s. Session entries are persisted only when the numbers change.
 - **Error mapping.** Quota/5xx step down ladder; auth, billing, and input errors fail fast.
 - **Dynamic catalog helpers.** Price/context-aware suggestions and ranking from your key’s available model set.
 
@@ -81,6 +91,32 @@ Env overrides (set before launch):
 
 Rule-based and $0 — no LLM classifier runs.
 
+## Ladders: configuration
+
+Ladder roles are derived from the live catalog (cheapest viable picks per role).
+Two overrides, applied in order of precedence (algorithm → file → env):
+
+1. File: `~/.pi/agent/tokens-ladder.json`
+
+    { "roles": { "fast": ["z-ai/glm-5.3-flash", "deepseek/deepseek-v4.1-flash"] } }
+
+   (`roles` wrapper optional — a bare `{ "fast": [...] }` works too.)
+
+2. Env (wins over the file): `TOKENS_FAST`, `TOKENS_CODER`, `TOKENS_REASONER`, `TOKENS_LONG_CONTEXT`, `TOKENS_PRIVATE`, `TOKENS_RESEARCH` — comma-separated model ids.
+
+    TOKENS_FAST="z-ai/glm-5.3-flash,qwen/qwen-3.8-27b" pi
+
+Env-listed ids are used as-is; catalog order is not consulted for them.
+
+## Environment variables
+
+| Variable | Used for |
+| --- | --- |
+| `TOKENS_API_KEY` | API key when Pi has no stored `tokens.bd` credential |
+| `TOKENS_ROUTER_PLAN` | `weekly` (default) or `monthly` for virtual-router |
+| `TOKENS_ROUTER_MODE` | `auto` (default), `economy`, `hard` for virtual-router |
+| `TOKENS_FAST` `TOKENS_CODER` `TOKENS_REASONER` `TOKENS_LONG_CONTEXT` `TOKENS_PRIVATE` `TOKENS_RESEARCH` | Ladder overrides (comma-separated ids) |
+
 ## Commands
 
 One root: `/tokens <subcommand>`.
@@ -91,7 +127,7 @@ One root: `/tokens <subcommand>`.
 | --- | --- |
 | `/tokens status` | Plan, remaining windows, wallet USD, key limits |
 | `/tokens forecast [--block=N]` | Projected monthly spend; optional soft cap hint |
-| `/tokens history [--graph] [--by-model]` | 7-day sparkline and per-model usage |
+| `/tokens history [--graph] [--by-model]` | 7-day sparkline and per-model usage (session only) |
 
 ### Catalog & pricing
 
@@ -101,7 +137,7 @@ One root: `/tokens <subcommand>`.
 | `/tokens compare [--compare-with <text>]` | Side-by-side prices or top-10 cheapest cost for an input size |
 | `/tokens health` | Live catalog check; reports counts and price/context |
 | `/tokens cost <text>` | Token estimate + total cost for the prompt |
-| `/tokens count [--model <id>] <text>` | Exact input-token count via the count-tokens endpoint; never billed |
+| `/tokens count [--model <id>] <text>` | Exact input-token count via the count-tokens endpoint; never billed (admission-checked, counts toward RPM) |
 
 ### Recommendations
 
@@ -149,13 +185,17 @@ Verify before committing:
 
 - The live catalog is the sole source of truth. If it fails or the key’s model list is empty, price-aware commands print `No costs loaded`/empty results and the ladder/default picks may be empty. Prices come from `https://tokens.bd/api/models`, which is not part of the documented API surface; `GET /v1/models` lists callable ids without prices. If the feed becomes unavailable, there is no price source.
 - Recommendations are rule-based; they do not call models and are not latency or quality guarantees.
+- All catalog models register as text-only — vision models are not usable through this provider. Reasoning flags are inferred from id patterns (`glm-5.3*`, `kimi-k3*`); other reasoning-capable models show up as non-reasoning.
+- All models register into all three wire protocols; on the endpoints a model can’t serve the gateway returns `endpoint_not_supported_for_model` / `anthropic_protocol_disabled`.
 - `virtual-router` only switch plans via explicit user action and never hands you a premium model by default.
+- Usage windows are polled every 60 s; alerts can lag a burst by up to a minute, and nothing is persisted until the numbers change.
 - Tokens.bd does not expose BDT balances/exchange rates; `/tokens status` prints USD only.
+- `/tokens pin` records a model id; it never changes what Pi routes. Use `/model`.
 - Streaming/tool calling/caching flags are delegated to Pi; the extension does not duplicate them.
 
 ## License & docs
 
 MIT — see [`LICENSE`](LICENSE). Changelog lives in [`CHANGELOG.md`](CHANGELOG.md).
+Source: <https://github.com/ashik-maybe/pi-tokens.bd>
 
 - Tokens.bd: <https://tokens.bd> · docs: <https://tokens.bd/docs>
-- Pi packages: <https://pi.dev/packages>

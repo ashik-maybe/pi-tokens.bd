@@ -12,6 +12,7 @@
 - Virtual router advertised `contextWindow: 1_048_576` vs `1_100_000` for the ladder virtual models; unified to `1_100_000`.
 - `/tokens explain` used a divergent regex classifier; it now reports the router's pick.
 - `/tokens pin` output now states nothing applies the pin (use `/model`).
+- README overhauled: uninstall/auth cleanup, first-run flow, ladder configuration (`tokens-ladder.json`, `TOKENS_*` env), environment reference, and the undocumented gateway surface (text-only registration, cross-protocol 4xx) moved into Known limits.
 
 ### Removed
 
