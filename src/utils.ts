@@ -1,9 +1,34 @@
+// Shared primitives for the extension.
+//
+//   timeoutSignal()  — AbortSignal.timeout with a safe fallback; every
+//                      tokens.bd network call goes through this (or a Pi-
+//                      provided signal) so a hung gateway never hangs a UI.
+//   agentDir()       — ~/.pi/agent (Pi's home). Used for tokens-ladder.json.
+//                      Auth lives in auth.json which we NEVER read directly;
+//                      resolveApiKey goes through Pi's registry instead, so
+//                      we can never authenticate as a different key than Pi.
+//   readJson()       — tolerant JSON reader (missing/corrupt -> undefined)
+//   extractApiKey / resolveApiKey / promptForApiKey — credential plumbing
+//
+// The tokens.bd API key never lands in env/files/logs we control beyond
+// Pi's own credential store; TOKENS_API_KEY is env-only by design.
+
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type {
   Credential,
   ProviderAuthInteraction,
 } from "@earendil-works/pi-ai/compat";
+
+// AbortSignal with timeout where supported; undefined otherwise.
+export function timeoutSignal(ms: number): AbortSignal | undefined {
+  try {
+    const t = (AbortSignal as any).timeout;
+    return typeof t === "function" ? t.call(AbortSignal, ms) : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 const PROVIDER_ID = "tokens.bd";
 

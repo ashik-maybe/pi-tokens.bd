@@ -14,6 +14,12 @@
 - `/tokens pin` output now states nothing applies the pin (use `/model`).
 - README overhauled: uninstall/auth cleanup, first-run flow, ladder configuration (`tokens-ladder.json`, `TOKENS_*` env), environment reference, and the undocumented gateway surface (text-only registration, cross-protocol 4xx) moved into Known limits.
 
+### Fixed
+
+- `tokens.bd-responses` and `tokens.bd-messages` providers now actually use the Responses and Anthropic Messages wire protocols at their correct endpoints — previously all three variants collapsed into chat-completions at `/v1`.
+- Ladder configuration is sanitized: non-string/empty entries in `tokens-ladder.json` and `TOKENS_*` env vars are ignored, and an empty env override no longer disables the ladder. Per role, env beats file beats the algorithmic ladder.
+- Network calls (`/v1/tokens/usage`, `/api/models`, `/v1/models` fallback paths, and the count_tokens endpoint) now time out after 10s instead of hanging.
+
 ### Removed
 
 - Bundled `costs.json` is dropped. The live `/api/models` catalogue is the sole source of truth. Offline/empty catalogue returns empty costs; price-aware commands print "No costs loaded"/empty results.

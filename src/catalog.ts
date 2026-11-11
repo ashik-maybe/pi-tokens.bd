@@ -1,3 +1,22 @@
+// Catalog loading, cost derivation, and ladder construction.
+//
+// Two data feeds, both fetched on Pi's normal refresh cycle:
+//   GET /v1/models       — ids your key may call (documented). No pricing.
+//   GET /api/models      — price/context table (NOT documented; live today).
+// Either may fail independently: if /v1/models fails we keep Pi's persisted
+// snapshot (storedFallback); if /api/models fails, costs reset to {} and the
+// price-aware commands print "No costs loaded" (never stale prices).
+//
+// The live catalog is the SOLE price source. There is deliberately no
+// bundled price file: tokens.bd's catalog drifts and a stale bundled copy
+// was worse than none (dropped in 0.6.0).
+//
+// Ladder construction (deriveLadder): start from the algorithmic picks
+// (cheapest priced models per role), then per-role fallback to the cheapest
+// overall; then env overrides TOKENS_<ROLE>; then ~/.pi/agent/tokens-ladder.json
+// (file loses to env, matches README). Empty/garbage override entries are
+// ignored — a bad file never takes the router down.
+
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { RefreshModelsContext } from "@earendil-works/pi-ai/compat";
@@ -14,12 +33,14 @@ import {
   PROVIDER_ID,
   PROVIDER_ID_MESSAGES,
   PROVIDER_ID_RESPONSES,
+  ALL_ROLES,
 } from "./config.js";
 import {
   agentDir,
   readJson,
   num,
   extractApiKey,
+  timeoutSignal,
 } from "./utils.js";
 
 interface CostEntry {
@@ -30,6 +51,8 @@ interface CostEntry {
   contextWindow: number;
 }
 
+type LadderMap = Record<string, string[]>;
+
 interface CatalogModel {
   alias: string;
   contextWindow: number;
@@ -39,11 +62,10 @@ interface CatalogModel {
   cacheWrite?: number;
 }
 
-type LadderMap = Record<string, string[]>;
-export const ALL_ROLES = ["fast", "coder", "reasoner", "long-context", "private", "research"] as const;
-
-// Last live catalog + costs fetched during refreshNativeModels. Used to derive
-// ladder roles dynamically at route time instead of from a file.
+// Last catalog + costs snapshot. Module-local because Pi persists providers
+// as separate objects; the ladder/router reads these cutouts at route time.
+// `lastCatalog` is reset to [] when the catalog fetch fails (never serve stale
+// or phantom prices); models still register, they just carry zero cost.
 let lastCatalog: CatalogModel[] = [];
 let lastCosts: Record<string, CostEntry> = {};
 
@@ -71,7 +93,7 @@ export function isAlwaysThinking(alias: string, description?: unknown): boolean 
 
 async function fetchCatalog(signal?: AbortSignal): Promise<CatalogModel[]> {
   try {
-    const res = await fetch(CATALOG_URL, { signal });
+    const res = await fetch(CATALOG_URL, { signal: signal ?? timeoutSignal(10_000) });
     if (!res.ok) return [];
     const data = (await res.json()) as { models?: any[] };
     const out: CatalogModel[] = [];
@@ -132,22 +154,32 @@ export function deriveLadder(catalog: CatalogModel[]): LadderMap {
     if (!algorithm[role].length && cheapest.length) algorithm[role] = cheapest;
   }
 
+  // Config/env overrides must be arrays of non-empty strings; anything else
+  // falls back to the algorithmic ladder for that role (env wins when set).
+  const cleanList = (value: unknown): string[] =>
+    Array.isArray(value) ? value.filter((v): v is string => typeof v === "string").map((v) => v.trim()).filter(Boolean) : [];
+
   const envOverride: LadderMap = {};
   for (const role of ALL_ROLES) {
-    const envKey = `TOKENS_${role.replace("-", "_").toUpperCase()}`;
-    const val = process.env[envKey];
-    if (val?.trim()) {
-      envOverride[role] = val.split(",").map((s: string) => s.trim()).filter(Boolean);
-    }
+    const envKey = `TOKENS_${role.replaceAll("-", "_").toUpperCase()}`;
+    const list = String(process.env[envKey] ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+    if (list.length) envOverride[role] = list;
   }
 
+  const result: LadderMap = { ...algorithm, ...envOverride };
   const agentLadder = join(agentDir(), "tokens-ladder.json");
   if (existsSync(agentLadder)) {
     const data = readJson(agentLadder);
-    const roles = (data?.roles ?? data) as LadderMap | undefined;
-    if (roles && typeof roles === "object") return { ...algorithm, ...roles, ...envOverride };
+    const raw = data?.roles && typeof data.roles === "object" ? data.roles : data;
+    if (raw && typeof raw === "object") {
+      for (const role of ALL_ROLES) {
+        if (envOverride[role]?.length) continue; // env wins over file
+        const list = cleanList((raw as LadderMap)[role]);
+        if (list.length) result[role] = list;
+      }
+    }
   }
-  return { ...algorithm, ...envOverride };
+  return result;
 }
 
 function normalizeInput(value: unknown): ("text" | "image")[] {
@@ -216,7 +248,7 @@ export async function fetchModelsRaw(apiKey: string, signal?: AbortSignal): Prom
   try {
     const res = await fetch(MODELS_URL, {
       headers: { Authorization: `Bearer ${apiKey}` },
-      signal,
+      signal: signal ?? timeoutSignal(10_000),
     });
     if (!res.ok) return [];
     const data = (await res.json()) as { data?: any[] };

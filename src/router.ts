@@ -1,7 +1,23 @@
-// Virtual router for Tokens.bd. One file. Optional.
-// Picks a physical model per request from the user's weekly or monthly allowlist.
-// Sticky on continuation/retry — task moves to one model, never silently off-model.
-// No LLM classifier: rules + user hints only, free to run.
+// Virtual router for Tokens.bd. One file. Optional (never on the default path).
+//
+// Two unrelated routers live here:
+//
+//   1. registerVirtualRouter() — the plan-aware assistant exposed as
+//      `tokens.bd/virtual-router`. Sticky: once a request is routed to a
+//      model, continuation/retry hops reuse the same model (request.state
+//      .chosen) instead of re-deciding, so a long task doesn't ping-pong
+//      between workers. `reason === "user"` forces a fresh decision.
+//      There is intentionally NO LLM classifier: rules + positional hints
+//      only — free, deterministic, and auditable.
+//
+//   2. routeForRole() — the role ladders behind `tokens.bd/<role>` virtual
+//      models (fast/coder/...). Iterates the derived ladder (cheap-first),
+//      fails over to the next rung on retryable errors (see errors.ts),
+//      fails fast on non-retryable ones, and throws a descriptive error when
+//      the ladder starves so Pi surfaces it instead of silently picking.
+//
+// Routing NEVER silently switches the user's plan: hints may narrow mode;
+// nothing here changes plan allowlists or grants premium models.
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { PROVIDER_ID } from "./config.js";
@@ -20,7 +36,12 @@ export interface RouterState {
 const DEFAULT_PLAN: RouterPlan = "weekly";
 const DEFAULT_MODE: RouterMode = "auto";
 
-// Exact IDs in the provider catalog. Edit here to add/remove models.
+// Allowlist intent (2026-11 catalog, weekly 5X and monthly Max Pro plans):
+// each pick is the cheapest model whose published allowance makes it
+// sustainable at the budget tier. Edit here to add/remove models; the IDs
+// must exist in /v1/models for the account or routing throws at request time.
+// Reasoning-trained picks (glm-5.3, kimi-k3) already think — we do NOT add
+// per-request effort hints to them.
 const WEEKLY = {
   economy: "z-ai/glm-5.3-flash",   // $20 allowance, biggest for cheap work
   balanced: "deepseek-ai/deepseek-v4.1-flash-1017", // $15, main coding worker
@@ -33,6 +54,8 @@ const MONTHLY = {
   hard: "z-ai/glm-5.3",                            // $60, reserved for [hard]
 } as const;
 
+// `[review]` is NOT in HINTS — it has plan-dependent semantics handled inline
+// in routeModel (monthly reviewer, weekly has no reviewer tier).
 const HINTS: Record<string, RouterMode> = {
   "[cheap]": "economy",
   "[economy]": "economy",
@@ -72,14 +95,18 @@ function lastUserText(messages: readonly any[]): string {
   return "";
 }
 
+// Positional hint grammar: the hint must be the FIRST token of the message
+// (e.g. "[hard] refactor this file"). `]` or `)` close it. Case-insensitive.
 const HINT_RE = /^\[(cheap|economy|balanced|hard|review)(\]|\))/i;
 
+// Hints are consumed by routing, never forwarded to the model as part of
+// the prompt — strip them before the classifier regexes see the text.
 function stripHint(text: string): string {
   return text.replace(HINT_RE, "").trimStart();
 }
 
-// User-facing recommendation entry: classify the current prompt and pick the
-// allowlisted model for the active plan/mode. Pure text-in, model-out.
+// User-facing recommendation entry used by `/tokens explain`. Pure
+// text-in, model-out; never mutates state.
 export function recommendModel(text: string): string {
   const plan = getRouterPlan();
   const mode = getRouterMode();
@@ -140,6 +167,11 @@ export function registerVirtualRouter(pi: ExtensionAPI): void {
     thinkingLevels: ["low", "medium", "high"],
     contextWindow: 1_100_000,
     maxTokens: 8192,
+    // `thinkingLevel` is fixed at "medium" for router picks — bumping it
+    // would multiply cost with no measured quality gain on these models.
+    // Stickiness pass: continuation/retry reuses the model already chosen
+    // for this task; a stale `chosen` (model removed from catalog) falls
+    // through to re-routing.
     route(request: any, ctx: any) {
       if (request?.state?.chosen && request?.reason !== "user") {
         const sticky = ctx.modelRegistry?.find?.(PROVIDER_ID, request.state.chosen);

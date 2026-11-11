@@ -1,5 +1,16 @@
-// Pi extension entrypoint. Kept thin deliberately: wiring only.
-// Deep logic lives in catalog, usage, errors, commands, utils, config, state.
+// Pi extension entrypoint. Kept thin deliberately: wiring only — providers,
+// virtual models and hooks are registered here; all logic lives in
+// catalog.ts, usage.ts, router.ts, commands.ts.
+//
+// Architecture notes for devs:
+//   - Three providers expose the SAME catalog under three Pi `api` tags.
+//     pi-ai dispatches each provider through its OWN concrete `api`
+//     implementation, so the variants genuinely speak their wire protocol.
+//   - Auth is api-key only. `/login tokens.bd` stores via Pi's credential
+//     store; headless runs use TOKENS_API_KEY. The `oauth` block exists so
+//     Pi's /login UI has a named entry; it behaves as a static key holder.
+//   - "Virtual models" (auto/fast/…/virtual-router) are routed per request
+//     by router.ts; they are never persisted as real models.
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createProvider } from "@earendil-works/pi-ai/compat";
@@ -28,12 +39,14 @@ import { registerTokensCommands } from "./commands.js";
 export default function (pi: ExtensionAPI) {
   const piApi: ExtensionAPI = pi;
 
-  const provider = providerApiAndBaseUrl(PROVIDER_ID);
-
-  const makeProvider = (id: string, name: string) => createProvider({
+  // Each variant gets its own wire protocol + base URL; the model `api`
+  // tag set by fetchNativeModels matches.
+  const makeProvider = (id: string, name: string) => {
+    const { api, baseUrl } = providerApiAndBaseUrl(id);
+    return createProvider({
     id,
     name,
-    baseUrl: provider.baseUrl,
+    baseUrl,
     auth: {
       apiKey: {
         name: "Tokens.bd API key",
@@ -47,6 +60,8 @@ export default function (pi: ExtensionAPI) {
           return undefined;
         },
       },
+      // Static-key "oauth" for Pi's interactive login UI. It never refreshes;
+      // `expires` is 10 years out and `refresh` is a pass-through.
       oauth: {
         name: "Tokens.bd API Key",
         login: async (interaction: any) => {
@@ -62,8 +77,9 @@ export default function (pi: ExtensionAPI) {
     },
     models: [],
     fetchModels: (ctx: any) => fetchNativeModels(ctx, id),
-    api: provider.api,
+    api,
   });
+  };
 
   // Register all three wire protocols.
   piApi.registerProvider(makeProvider(PROVIDER_ID, "Tokens.bd"));
@@ -99,10 +115,13 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  // Budget-aware router. Picks one model per request from the plan's allowlist.
+  // Budget-aware router. Picks one model per request from the plan's allowlist;
+  // see router.ts for the routing decision and continuation stickiness rules.
   registerVirtualRouter(piApi);
 
-  // Session start poll + usage updates.
+  // Usage polling: once on session_start, then every 60 s. Values are
+  // persisted (appendEntry) ONLY when the window/wallet signature changes,
+  // so idle sessions don't bloat the session file — see usage.ts refreshUsage.
   let refreshTimer: ReturnType<typeof setInterval> | null = null;
 
   piApi.on("session_start", async (_e: any, ctx: any) => {
@@ -120,7 +139,10 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  // Marked with after_provider_response kept for retry/hint capture.
+  // Kept for request-id + Retry-After capture. Pi surfaces retry/backoff
+  // itself; we only need these to enrich ladder errors (router.ts) and for
+  // the `tokens:request-logged` bus event. The cast is required because Pi's
+  // hook catalog types don't include this event.
   piApi.on("after_provider_response" as any, async (event: any, _ctx: any) => {
     try {
       const headers = event?.headers ?? {};

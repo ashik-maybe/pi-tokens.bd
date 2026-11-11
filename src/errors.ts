@@ -1,6 +1,17 @@
-// Machine-readable gateway error classification. Both wire shapes are
-// supported: OpenAI-style `{"error":{"code":"..."}}` and Anthropic-style
-// `{"type":"error","error":{"type":"...","code":"..."}}`.
+// Machine-readable gateway error classification.
+//
+// tokens.bd docs (errors.md + authentication + models-and-usage) define two
+// body shapes — both carry a machine-readable `code`:
+//   OpenAI-style:    {"error": {"code": "window_exhausted", ...}}
+//   Anthropic-style: {"type": "error", "error": {"type": "...", "code": "..."}}
+//
+// classifyFailure feeds the role-ladder failover decision (router.ts). The
+// split matters for budget: retryable -> step down to the next ladder rung;
+// non-retryable -> fail fast with the actionable hint from ERROR_MAP.
+// When in doubt we fail fast — burning tokens on 4xx/billing errors is worse.
+//
+// Bare 429 is deliberately NON-retryable: it may be `window_exhausted` /
+// `model_limit_reached`, which looping retries cannot fix.
 
 export const ERROR_MAP: Record<string, string> = {
   missing_api_key: "No API key. Run /login tokens.bd.",

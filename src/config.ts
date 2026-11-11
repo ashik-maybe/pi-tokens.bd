@@ -1,3 +1,14 @@
+// Dev docs live in these headers and the inline notes — this file is the
+// endpoint registry. Everything derives from https://tokens.bd:
+//
+//   BASE_URL            OpenAI-compatible base (chat-completions + responses)
+//   MESSAGES_BASE_URL   Anthropic Messages base — NO `/v1` suffix, per docs
+//                       (`POST /v1/messages`, "https://tokens.bd/v1/messages")
+//   MODELS_URL          Callable model ids (documented; no pricing)
+//   CATALOG_URL         Price feed (NOT documented; exists live as of 2026-11)
+//   USAGE_URL           Plan/wallet usage windows (documented)
+//   COUNT_TOKENS_URL    Count-tokens probe (documented, admission-checked)
+
 export const BASE_URL = "https://tokens.bd/v1";
 export const MESSAGES_BASE_URL = "https://tokens.bd";
 export const MODELS_URL = "https://tokens.bd/v1/models";

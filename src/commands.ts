@@ -1,8 +1,35 @@
 // /tokens root handler + deprecated /tokens-* shims.
-// All wiring goes here to keep index.ts thin: provider + hooks + poller only.
+//
+// Shape: a `handlers` map keyed by subcommand, dispatched by
+// `tokensRootHandler`. Unknown subcommand -> prints the usage list.
+//
+// Conventions for every handler below:
+//   - `args` arrive as a whitespace-split token array (Pi command API).
+//   - `ctx.ui.notify(msg, level)` is fire-and-forget; wrap fallible bodies in
+//     try/catch and report, never throw — an exception kills the command.
+//   - Network goes through catalog.ts/usage.ts with 10 s timeouts; a dead
+//     tokens.bd degrades to "No costs loaded"/"live catalog empty" messages.
+//   - Commands are read-only: nothing here changes routing or plan state
+//     except `/tokens router plan|mode` (state.ts routerPlan/routerMode).
+//
+// Subcommand map (README lists the same surface):
+//   status/forecast/history     usage & billing (usage.ts)
+//   models/compare/health/rank  live catalog reads (catalog.ts)
+//   cost/count                  token/cost estimation (count uses
+//                               POST /v1/messages/count_tokens — NOT billed,
+//                               but the endpoint is admission-checked, so it
+//                               consumes RPM; hence the 8k char cap)
+//   suggest/suggest-all         rule-based recommendations (dynamic-suggest)
+//   explain                     prints what the router would pick (router.ts)
+//   errors                      machine-readable error code table (errors.ts)
+//   router                      /tokens router status|plan|mode
+//
+// Deprecated `/tokens-*` shims at the bottom warn once per session and
+// forward to the root handler; they exist for muscle memory only.
 
 import {
   resolveApiKey,
+  timeoutSignal,
 } from "./utils.js";
 import {
   fetchModelsRaw,
@@ -148,6 +175,9 @@ export function registerTokensCommands(pi: any): void {
         ctx.ui.notify("Provide text. Example: /tokens count --model deepseek/deepseek-v4.1-flash Explain idempotency.", "info");
         return;
       }
+      // count_tokens is "not billed" but the docs describe it as admission-
+      // checked (consumes RPM). Cap the payload so a paste mistake can't
+      // burn the rate budget; ~8k chars ≈ 2k tokens.
       if (text.length > 8000) {
         ctx.ui.notify("Text too large — split and retry.", "warning");
         return;
@@ -177,6 +207,7 @@ export function registerTokensCommands(pi: any): void {
             "content-type": "application/json",
           },
           body: JSON.stringify({ model, messages: [{ role: "user", content: text }] }),
+          signal: timeoutSignal(10_000),
         });
         const raw = await res.json().catch(() => undefined);
         if (!res.ok) {

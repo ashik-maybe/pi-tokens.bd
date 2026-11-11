@@ -1,11 +1,21 @@
 // Usage discovery, alerts and model-usage tracking.
-// Provides utilities the default-export wires into Pi hooks.
+//
+// Contract with tokens.bd (docs/models-and-usage.md):
+//   GET /v1/tokens/usage -> { plan, wallet: { balanceUsd }, windows[] }
+//   Each window: { type, unit, label, used, limit, remaining, percentUsed, resetsAt }
+//   USD-unit windows are needed for spend projection; `requests`-unit windows
+//   carry no price. `session_5h` has no monthly-equivalent projection.
+//
+// The poller (wired from index.ts) runs every 60 s. It persists a
+// `tokens-usage` session entry ONLY when the window/wallet signature moves,
+// otherwise it would append one entry per poll and grow the session file.
 
 import {
   USAGE_URL,
 } from "./config.js";
 import {
   resolveApiKey,
+  timeoutSignal,
 } from "./utils.js";
 import {
   extensionState,
@@ -13,7 +23,10 @@ import {
 
 export async function fetchUsage(apiKey: string): Promise<any | null> {
   try {
-    const res = await fetch(USAGE_URL, { headers: { Authorization: `Bearer ${apiKey}` } });
+    const res = await fetch(USAGE_URL, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: timeoutSignal(10_000),
+    });
     if (!res.ok) return null;
     return await res.json();
   } catch {
@@ -29,8 +42,8 @@ export const USAGE_ALERT_THRESHOLDS = [
 
 const usageAlertMemory = new Map<string, number>();
 
-// Poll results change slowly; persist usage entries only when the numbers
-// actually move, so a 60s poller does not bloat the session file.
+// Signature covers every field the UI renders. Any movement re-persists;
+// identical windows collapse into one entry.
 let lastUsageSignature: string | null = null;
 
 function usageSignature(usage: any): string {
@@ -66,11 +79,16 @@ export async function refreshUsage(_pi: { appendEntry: (k: string, v: any) => vo
   checkUsageAlerts(usage, ctx?.ui);
 }
 
+// Local numeric coercion, same semantics as utils.num but not exported
+// (keeps this module's public surface small).
 function num(value: unknown, fallback: number): number {
   const parsed = typeof value === "number" ? value : Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+// One alert per (window, threshold, reset cycle), once per session. `used`
+// and `percentUsed` rise per request; the memory map suppresses repeats.
+// Memory is keyed by reset time so a new window cycle re-arms the alerts.
 export function checkUsageAlerts(usage: any, ui?: { notify?: (msg: string, level: string) => void }): void {
   if (!usage) return;
   for (const w of usage.windows ?? []) {

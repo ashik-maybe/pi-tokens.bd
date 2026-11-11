@@ -1,6 +1,18 @@
-// Dynamic catalog-backed recommendation for expanded pool.
-// Distinct from virtual-router, which only uses plan-allowlists.
-// Pure price/context scoring. No LLM classifier. No network fetch per request.
+// Dynamic catalog-backed recommendation for the EXPANDED pool.
+//
+// Selection contract:
+//   - Candidates: every model on the account's /v1/models with a live catalog
+//     price > $0. Models without catalog pricing are excluded entirely.
+//   - Non-hard prompts are restricted to input < $2.00/M ("cheap tier") to
+//     avoid casually routing to premium/inflated picks; hard prompts may pick
+//     from the full pool.
+//   - Scoring is deterministic price/context heuristics (1/avgPrice, +log10
+//     context for hard prompts, 2x for explicit cheap hints). No LLM call.
+//   - These are SUGGESTIONS only — nothing here is applied automatically.
+//
+// virtual-router (router.ts) is a different thing: it routes the request.
+// This module answers "what would you pick for this text?" for /tokens
+// suggest-all|rank|explain. Pure price/context scoring; no LLM classifier.
 
 import { fetchModelsRaw, effectiveCosts, mapModels } from "./catalog.js";
 import { BASE_URL, PROVIDER_ID } from "./config.js";
