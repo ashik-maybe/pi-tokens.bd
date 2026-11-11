@@ -118,9 +118,13 @@ export function registerTokensCommands(pi: any): void {
       for (const w of usage.windows ?? []) lines.push(formatWindow(w));
       if (usage.wallet && usage.wallet.balanceUsd !== null) lines.push(`Wallet: $${usage.wallet.balanceUsd.toFixed(2)} USD (BDT balance shown on dashboard only)`);
       const projected = projectedMonthlySpend(usage);
-      lines.push(`Projected monthly spend: $${projected.toFixed(2)} USD`);
-      if (blockArg && Number.isFinite(Number(blockArg)) && projected > Number(blockArg)) {
-        lines.push(`Blocked: projection exceeds $${Number(blockArg).toFixed(2)} USD; switching will not auto-pick higher tier.`);
+      if (projected === null) {
+        lines.push("Projected monthly spend: n/a (no USD-unit weekly/monthly window to project)");
+      } else {
+        lines.push(`Projected monthly spend: $${projected.toFixed(2)} USD`);
+        if (blockArg && Number.isFinite(Number(blockArg)) && projected > Number(blockArg)) {
+          lines.push(`Blocked: projection exceeds $${Number(blockArg).toFixed(2)} USD; switching will not auto-pick higher tier.`);
+        }
       }
       ctx.ui.notify(lines.join("\n"), "info");
     },
@@ -219,18 +223,28 @@ export function registerTokensCommands(pi: any): void {
       const lines = rows.map((e: any) => {
         const d = new Date(e.data.date).toLocaleDateString();
         const w = e.data.windows?.[0];
-        return `${d}: $${e.data.wallet?.toFixed(2) ?? "?"} | ${w ? `${w.percentUsed}%` : "n/a"}`;
+        const wallet = typeof e.data.wallet === "number" ? `$${e.data.wallet.toFixed(2)}` : "n/a";
+        return `${d}: ${wallet} | ${w ? `${w.percentUsed}%` : "n/a"}`;
       });
       if (wantsGraph) {
-        const samples = rows.map((e: any) => Number(e.data.wallet ?? 0));
+        const points = rows
+          .map((e: any): { date: string; wallet: number } | null => (typeof e.data.wallet === "number" ? { date: String(e.data.date), wallet: e.data.wallet as number } : null))
+          .filter((p: { date: string; wallet: number } | null): p is { date: string; wallet: number } => p !== null);
+        if (!points.length) {
+          lines.push("--- graph ---");
+          lines.push("No wallet data to graph (no wallet on this account yet).");
+          ctx.ui.notify(lines.join("\n"), "info");
+          return;
+        }
+        const samples = points.map((p: { date: string; wallet: number }) => p.wallet);
         const max = Math.max(...samples, 1);
         const bars = samples.map((s: number) => {
           const blocks = Math.round((s / max) * 16);
           return "█".repeat(Math.max(1, blocks));
         });
         lines.push("--- graph ---");
-        for (let i = 0; i < rows.length; i += 1) {
-          const d = new Date(rows[i].data.date).toLocaleDateString();
+        for (let i = 0; i < points.length; i += 1) {
+          const d = new Date(points[i].date).toLocaleDateString();
           lines.push(`${d} ${bars[i]} $${samples[i].toFixed(2)}`);
         }
       }

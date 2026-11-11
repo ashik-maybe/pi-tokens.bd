@@ -71,12 +71,12 @@ export async function refreshUsage(_pi: { appendEntry: (k: string, v: any) => vo
   extensionState.lastUsage = usage;
   const entry = {
     date: new Date().toISOString(),
-    wallet: usage.wallet?.balanceUsd ?? 0,
-    windows: (usage.windows ?? []).map((w: any) => ({ type: w.type, used: w.used, limit: w.limit, percentUsed: w.percentUsed })),
+    wallet: usage.wallet?.balanceUsd ?? null,
+    windows: (usage.windows ?? []).map((w: any) => ({ type: w.type, used: w.used, limit: w.limit, percentUsed: w.percentUsed, unit: w.unit })),
   };
   _pi.appendEntry("tokens-usage", entry);
   _pi.events.emit("tokens:usage-updated", {
-    wallet: usage.wallet?.balanceUsd ?? 0,
+    wallet: usage.wallet?.balanceUsd ?? null,
     percentUsed: usage.windows?.[0]?.percentUsed ?? 0,
     plan: usage.plan,
     windows: usage.windows,
@@ -135,18 +135,21 @@ export function formatWindow(w: any): string {
   return `${label}: ${remaining} remaining of ${limit}${unit ? ` ${unit}` : ""} (${percent}%, used ${used}, resets in ${timeLeft})`;
 }
 
-// Project a monthly spend figure for the current plan window. For a weekly
-// window we assume the observed spend repeats weekly; for a monthly window the
-// observed usage is already the monthly figure.
-export function projectedMonthlySpend(usage: any): number {
-  let projected = 0;
+// Project a monthly spend figure for the current plan window, in USD.
+// Only usd-unit windows count; `requests` windows carry no price. Only
+// weekly/monthly plan windows project; a session_5h window has no monthly
+// equivalent. Returns null when nothing qualifies.
+export function projectedMonthlySpend(usage: any): number | null {
+  let projected: number | null = null;
   for (const w of usage?.windows ?? []) {
+    if (w?.unit && w.unit !== "usd") continue;
     const limit = Number(w?.limit ?? 0);
     const percent = Number(w?.percentUsed ?? 0);
     if (!Number.isFinite(limit) || !Number.isFinite(percent) || limit <= 0) continue;
     const spent = (limit * percent) / 100;
-    const monthly = w?.type === "weekly" ? (spent * 30) / 7 : spent;
-    projected = Math.max(projected, monthly);
+    const monthly = w?.type === "weekly" ? (spent * 30) / 7 : w?.type === "monthly" ? spent : null;
+    if (monthly === null) continue;
+    projected = projected === null ? monthly : Math.max(projected, monthly);
   }
   return projected;
 }
