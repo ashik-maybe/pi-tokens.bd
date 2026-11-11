@@ -37,6 +37,23 @@ function scoreModel(m: CatalogModel, isHard: boolean, isCheap: boolean): number 
   return score;
 }
 
+// Return top N models by score for the given text.
+export async function rankFromCatalog(text: string, apiKey: string, limit = 10): Promise<CatalogModel[] | null> {
+  const pool = await fetchDynamicPool(apiKey);
+  if (!pool.length) return null;
+
+  const lower = String(text ?? "").toLowerCase();
+  const isHard = /complex|refactor|debug|implement|design|architect|security|performance|optimize/.test(lower) || lower.length > 1500;
+  const isCheap = /\[cheap\]/.test(lower) || /\bfix typo\b|\brenam|\bcomment\b/.test(lower) || lower.length < 200;
+
+  const filtered = isHard ? pool : pool.filter((m) => m.input < 2.0);
+  if (!filtered.length) return null;
+
+  return [...filtered]
+    .sort((a, b) => scoreModel(b, isHard, isCheap) - scoreModel(a, isHard, isCheap))
+    .slice(0, Math.max(1, Math.min(20, limit)));
+}
+
 // Choose the best affordable model for `text` from the live catalog.
 // Returns null if the catalogue is empty. Filters premium models unless hard.
 export async function recommendFromCatalog(text: string, apiKey: string): Promise<{ model: string; rationale: string } | null> {

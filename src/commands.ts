@@ -29,6 +29,7 @@ import {
 import {
   fetchDynamicPool,
   recommendFromCatalog,
+  rankFromCatalog,
 } from "./dynamic-suggest.js";
 
 export function registerTokensCommands(pi: any): void {
@@ -272,6 +273,27 @@ export function registerTokensCommands(pi: any): void {
       ctx.ui.notify(`Models (${pool.length}):\n${lines.slice(0, 20).join("\n")}`, "info");
     },
 
+    rank: async (args: any, ctx: any) => {
+      const apiKey = await resolveApiKey(ctx);
+      if (!apiKey) {
+        ctx.ui.notify("Run /login tokens.bd first.", "warning");
+        return;
+      }
+      const parts = (args ?? []).map(String);
+      const text = parts.join(" ").trim();
+      if (!text) {
+        ctx.ui.notify("Usage: /tokens rank <prompt text>", "warning");
+        return;
+      }
+      const ranked = await rankFromCatalog(text, apiKey, 10);
+      if (!ranked) {
+        ctx.ui.notify("No models returned (catalog empty or key restricted).", "warning");
+        return;
+      }
+      const lines = ranked.map((m, i) => `${i + 1}. ${m.id}: $${m.input.toFixed(2)}/M in, $${m.output.toFixed(2)}/M out, ctx=${(m.contextWindow / 1000).toFixed(0)}K`);
+      ctx.ui.notify(`Ranked:\n${lines.join("\n")}`, "info");
+    },
+
     router: async (args: any, ctx: any) => {
       const parts = (args ?? []).map(String);
       const sub = (parts[0] ?? "status").toLowerCase();
@@ -334,7 +356,7 @@ export function registerTokensCommands(pi: any): void {
   }
 
   pi.registerCommand("tokens", {
-    description: "Tokens.bd one-stop: /tokens (status|compare|suggest|count|history|errors|health|forecast|suggest-all|models|router)",
+    description: "Tokens.bd one-stop: /tokens (status|compare|suggest|count|history|errors|health|forecast|suggest-all|models|rank|router)",
     handler: tokensRootHandler,
   });
 }

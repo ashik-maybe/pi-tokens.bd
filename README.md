@@ -79,9 +79,14 @@ Hints are positional: `[hard]` at the start of a message routes to the hard tier
 | `/tokens status` | plan, remaining windows, wallet, key limits |
 | `/tokens compare` | models by cost; cache column; thinking shown |
 | `/tokens suggest` | cheapest routine model |
+| `/tokens suggest-all [text]` | expanded pool: cheapest affordable model for the prompt |
+| `/tokens rank <text>` | top-10 list for the prompt, context-aware score |
+| `/tokens models` | all models the key can call, with price/context |
 | `/tokens count [--model <id>] <text>` | count prompt tokens; not billed |
 | `/tokens history` | 7-day trend |
 | `/tokens errors` | codes + fixes |
+| `/tokens health` | live catalog check; reports count + price context |
+| `/tokens forecast` | projected monthly spend |
 | `/tokens router status|plan|mode` | budget router toggles |
 
 Deprecated shims `/tokens-status`, `/tokens-compare`, etc. are still accepted; they warn once per session and call through.
