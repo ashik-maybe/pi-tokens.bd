@@ -24,13 +24,11 @@ const DEFAULT_MODE: RouterMode = "auto";
 const WEEKLY = {
   economy: "z-ai/glm-5.3-flash",   // $20 allowance, biggest for cheap work
   balanced: "deepseek-ai/deepseek-v4.1-flash-1017", // $15, main coding worker
-  cheapAlt: "deepseek/deepseek-v4.1-flash",          // $15, input-heavy alt
 } as const;
 
 const MONTHLY = {
   balance: "deepseek-ai/deepseek-v4.1-flash-1017", // $60, main worker
   cheap: "xiaomi/mimo-v2.6-flash",                 // $60, small work
-  cheapAlt: "deepseek/deepseek-v4.1-flash",        // $60
   reviewer: "claude-haiku-5-5",                    // $60, bounded review
   hard: "z-ai/glm-5.3",                            // $60, reserved for [hard]
 } as const;

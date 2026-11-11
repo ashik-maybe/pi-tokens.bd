@@ -11,13 +11,13 @@ Live catalog, role ladders, optional budget router, usage alerts — kept lean.
 
 ## Install / update / remove
 
-    pi install git:github.com/ashik-maybe/tokens.bd-adapter-for-pi.dev
-    pi update git:github.com/ashik-maybe/tokens.bd-adapter-for-pi.dev
-    pi remove git:github.com/ashik-maybe/tokens.bd-adapter-for-pi.dev
+    pi install git:github.com/ashik-maybe/pi-tokens.bd
+    pi update git:github.com/ashik-maybe/pi-tokens.bd
+    pi remove git:github.com/ashik-maybe/pi-tokens.bd
 
 Or try it in-place without installing:
 
-    pi -e git:github.com/ashik-maybe/tokens.bd-adapter-for-pi.dev
+    pi -e git:github.com/ashik-maybe/pi-tokens.bd
 
 Deleting the clone uninstalls the provider; Pi rescans extensions on next launch.
 
