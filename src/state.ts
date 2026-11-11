@@ -6,7 +6,6 @@ export const extensionState = {
   lastUsage: null as any,
   routerPlan: null as "weekly" | "monthly" | null,
   routerMode: null as "auto" | "economy" | "hard" | null,
-  routerDisable: false as boolean,
   lastPinnedModel: null as string | null,
   sessionPinnedModel: null as string | null,
   modelUsage: {} as Record<string, number>,

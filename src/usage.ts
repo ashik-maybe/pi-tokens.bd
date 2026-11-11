@@ -160,7 +160,6 @@ export function createBeforeProviderRequestHandler(piApi: any) {
     try {
       const payload = event?.payload;
       if (payload === undefined || typeof payload !== "object") return undefined;
-      const chars = JSON.stringify(payload).length;
       const approxTokens = roughPromptTokens(payload);
       const hint = String(payload.model ?? ctx?.model?.id ?? "").toLowerCase();
       if (hint) {

@@ -35,12 +35,6 @@ const MONTHLY = {
   hard: "z-ai/glm-5.3",                            // $60, reserved for [hard]
 } as const;
 
-// Perf without paying attention to the selection unless the user asks.
-const ALLOWLIST: Record<RouterPlan, readonly string[]> = {
-  weekly: [WEEKLY.economy, WEEKLY.balanced, WEEKLY.cheapAlt],
-  monthly: [MONTHLY.cheap, MONTHLY.balance, MONTHLY.reviewer, MONTHLY.hard, MONTHLY.cheapAlt],
-};
-
 const HINTS: Record<string, RouterMode> = {
   "[cheap]": "economy",
   "[economy]": "economy",
