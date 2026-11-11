@@ -2,7 +2,6 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type {
   Credential,
-  OAuthCredential,
   ProviderAuthInteraction,
 } from "@earendil-works/pi-ai/compat";
 
