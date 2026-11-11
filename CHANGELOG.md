@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Removed
+
+- Bundled `costs.json` is dropped. The live `/api/models` catalogue is the sole source of truth. Offline/empty catalogue returns empty costs; price-aware commands print "No costs loaded"/empty results.
+
+
 ### Added
 
 - Typed error classifier parses `error.code` (OpenAI shape) and Anthropic-shaped `code` instead of substring guessing; new `free_limit_reached` mapped; `model_limit_reached` moved to fail-fast.

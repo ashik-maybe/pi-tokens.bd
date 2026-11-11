@@ -217,24 +217,10 @@ function storedFallback(context: RefreshModelsContext): any[] {
   return [];
 }
 
-// Bundled costs.json is a fallback only. The live /api/models catalogue is
-// the source of truth for prices and context windows.
+// Dynamic-only policy: no bundled fallback.
+// The live /api/models catalogue is the single source of truth for prices and
+// context windows. Offline/empty catalogue returns an empty object.
 export function loadFallbackCosts(): Record<string, CostEntry> {
-  const candidates = [
-    join(agentDir(), "tokens-costs.json"),
-    join(packageRootDir(), "costs.json"),
-  ];
-  for (const candidate of candidates) {
-    if (!existsSync(candidate)) continue;
-    const data = readJson(candidate);
-    if (data?.models && typeof data.models === "object") return data.models as Record<string, CostEntry>;
-    if (data && typeof data === "object" && !data._note && !data.roles) {
-      const values = Object.values(data);
-      if (values.length && typeof values[0] === "object" && values[0] !== null && "input" in (values[0] as any)) {
-        return data as Record<string, CostEntry>;
-      }
-    }
-  }
   return {};
 }
 
@@ -273,8 +259,8 @@ export async function fetchNativeModels(context: RefreshModelsContext, provider:
     lastCostFetchedAt = new Date();
   } else {
     lastCatalog = [];
-    lastCosts = loadFallbackCosts();
-    lastCostSource = "bundled costs.json";
+    lastCosts = {};
+    lastCostSource = "offline (dynamic-only)";
     lastCostFetchedAt = null;
   }
   const baseUrl = providerApiAndBaseUrl(provider).baseUrl;
@@ -292,6 +278,5 @@ export function getLastCosts(): Record<string, CostEntry> { return lastCosts; }
 export function getLastCostSource(): string { return lastCostSource; }
 export function getLastCostFetchedAt(): Date | null { return lastCostFetchedAt; }
 export function effectiveCosts(): Record<string, CostEntry> {
-  if (Object.keys(lastCosts).length) return lastCosts;
-  return loadFallbackCosts();
+  return lastCosts;
 }

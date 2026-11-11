@@ -7,16 +7,23 @@
   "types": "./src/index.ts",
   "license": "MIT",
   "files": [
-    "src",
-    "costs.json"
+    "src"
   ],
-  "keywords": ["pi", "pi-package", "pi-extension", "tokens.bd", "provider"],
+  "keywords": [
+    "pi",
+    "pi-package",
+    "pi-extension",
+    "tokens.bd",
+    "provider"
+  ],
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
     "@earendil-works/pi-ai": "*"
   },
   "pi": {
-    "extensions": ["./src/index.ts"],
+    "extensions": [
+      "./src/index.ts"
+    ],
     "changelogPath": "./CHANGELOG.md"
   },
   "dependencies": {}

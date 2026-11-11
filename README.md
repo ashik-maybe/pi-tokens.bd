@@ -51,7 +51,7 @@ Headless/CI alternative:
 ## What ships
 
 - **Three provider variants.** `tokens.bd` (Chat Completions), `tokens.bd-responses` (Responses API), `tokens.bd-messages` (Anthropic Messages, piped through for tool-style workflows). All share the same key.
-- **Live catalog.** Pricing and model list are fetched on startup from `https://tokens.bd/api/models`; bundled `costs.json` is the offline fallback.
+- **Live catalog.** Pricing and model list are fetched on startup from `https://tokens.bd/api/models`. No bundled fallback: offline/empty catalogue means expensive commands show "No costs loaded" and the ladder falls through to empty defaults.
 - **Role ladders.** `fast`, `coder`, `reasoner`, `long-context`, `private`, `research` pick the cheapest available model per role and step down on quota/5xx errors. `auto` is an alias to `fast`.
 - **Virtual router.** `tokens.bd/virtual-router` is an opt-in, plan-aware assistant. It picks one model per task from a narrow weekly/monthly allowlist and sticks to it on continuations. No auto-switch between plans. No premium fallback.
 - **Usage alerts.** 75/90/100% window-count warnings, plus a low-wallet alert below $1.
@@ -161,7 +161,7 @@ which is `tsc --noEmit` plus a load-time `--list-models` smoke test.
 
 ## Known limits
 
-- Live costs/fetched model list may fail on startup; bundled `costs.json` takes over as a static fallback.
+- No bundled fallback remains. If the catalog fetch fails or your key returns an empty model list, price-aware commands (`/tokens models`, `/tokens compare`, `/tokens cost`) will show empty results and the ladder/default picks may be empty. Retry after the network/catalog recovers.
 - `/tokens` recommendations are rule-based; they do not call models and are neither latency nor quality guarantees.
 - `virtual-router` sticks to its allowlist on continuations and only switches on explicit user action (hint or task boundary); it never auto‑escalates to a premium tier.
 - `/tokens` BDT balances aren’t surfaced — USD only; full figures live on the dashboard.
