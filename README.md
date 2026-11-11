@@ -86,10 +86,12 @@ Hints are positional: `[hard]` at the start of a message routes to the hard tier
 | `/tokens history [--graph]` | 7-day trend; `--graph` draws an ASCII sparkline |
 | `/tokens errors` | codes + fixes |
 | `/tokens health` | live catalog check; reports count + price context |
-| `/tokens forecast` | projected monthly spend |
-| `/tokens models --limit N [--cheap]` | top N cheapest models for the current key |
+| `/tokens forecast [--block $USD]` | projected monthly spend; optional soft cap latch |
+| `/tokens models --limit N [--cheap] [--count]` | cheapest N models; `--cheap` sorts by price; `--count` prints number only |
+| `/tokens compare [--compare-with <text>]` | price compare; with text shows top-10 cheapest cost for that input size |
 | `/tokens pin <model-id>` | save a pinned model locally (not auto-applied) |
 | `/tokens cost <text>` | cost estimate for the prompt via cheapest affordable model |
+| `/tokens explain <text>` | explain classifier verdict and picked model for the prompt |
 | `/tokens router status|plan|mode` | budget router toggles |
 
 Deprecated shims `/tokens-status`, `/tokens-compare`, etc. are still accepted; they warn once per session and call through.

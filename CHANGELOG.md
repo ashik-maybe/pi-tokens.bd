@@ -23,6 +23,11 @@
 - Added `/tokens rank <text>` — top-10 ranked list for the prompt by price/context score.
 - Added `/tokens cost <text>` and `/tokens cost --estimate <text>` — cost estimate using cheapest affordable model; no network call for the text path.
 - Added `/tokens pin <model-id>` — writes a pinned model to `~/.pi/agent/pinned-model.json`; not auto-applied.
+- Added `/tokens explain <text>` — reveals classifier verdict and picked model for a prompt.
+- Extended `/tokens forecast` with `--block=<usd>` to print a soft cap latch when projection exceeds the threshold.
+- Extended `/tokens models` with `--cheap` (cheapest-first), `--limit N`, and `--count`.
+- Extended `/tokens compare` with `--compare-with <text>` to print the 10 cheapest models for that input size.
+- Extended `/tokens rank` with `--cheap` to print the 10 cheapest models as a ranked list.
 - Added `/tokens history --graph` — ASCII sparkline of wallet history derived from session usage entries.
 - `/tokens-plan` claim removed (never registered).
 

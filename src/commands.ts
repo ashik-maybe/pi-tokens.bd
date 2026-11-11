@@ -94,7 +94,9 @@ export function registerTokensCommands(pi: any): void {
       ctx.ui.notify(`tokens.bd: ${models.length} models via live catalog. ${lines.slice(0, 30).join(", ")}`, "info");
     },
 
-    forecast: async (_args: any, ctx: any) => {
+    forecast: async (args: any, ctx: any) => {
+      const parts = (args ?? []).map(String);
+      const blockArg = parts.find((p: string) => p.startsWith("--block="))?.split("=")[1];
       const apiKey = await resolveApiKey(ctx);
       if (!apiKey) {
         ctx.ui.notify("Run /login tokens.bd first.", "warning");
@@ -115,7 +117,11 @@ export function registerTokensCommands(pi: any): void {
       }
       for (const w of usage.windows ?? []) lines.push(formatWindow(w));
       if (usage.wallet && usage.wallet.balanceUsd !== null) lines.push(`Wallet: $${usage.wallet.balanceUsd.toFixed(2)} USD (BDT balance shown on dashboard only)`);
-      lines.push(`Projected monthly spend: $${projectedMonthlySpend(usage).toFixed(2)} USD`);
+      const projected = projectedMonthlySpend(usage);
+      lines.push(`Projected monthly spend: $${projected.toFixed(2)} USD`);
+      if (blockArg && Number.isFinite(Number(blockArg)) && projected > Number(blockArg)) {
+        lines.push(`Blocked: projection exceeds $${Number(blockArg).toFixed(2)} USD; switching will not auto-pick higher tier.`);
+      }
       ctx.ui.notify(lines.join("\n"), "info");
     },
 
@@ -220,10 +226,30 @@ export function registerTokensCommands(pi: any): void {
       ctx.ui.notify(lines.join("\n"), "info");
     },
 
-    compare: async (_args: any, ctx: any) => {
+    compare: async (args: any, ctx: any) => {
       const apiKey = await resolveApiKey(ctx);
       if (!apiKey) {
         ctx.ui.notify("Run /login tokens.bd first.", "warning");
+        return;
+      }
+      const parts = (args ?? []).map(String);
+      const cwIdx = parts.indexOf("--compare-with");
+      const compareText = cwIdx >= 0 ? parts.slice(cwIdx + 1).join(" ").trim() : "";
+      if (compareText) {
+        const tokensIn = Math.ceil(compareText.length / 4);
+        const entries = Object.entries(effectiveCosts());
+        if (!entries.length) {
+          ctx.ui.notify("No costs loaded.", "warning");
+          return;
+        }
+        const sorted = entries.map(([id, c]) => {
+          const inC = Number(c?.input ?? 0);
+          const outC = Number(c?.output ?? 0);
+          const outTokens = Math.max(256, Math.min(1024, Math.ceil(tokensIn / 2)));
+          const costUsd = (tokensIn * inC + outTokens * outC) / 1_000_000;
+          return { id, costUsd };
+        }).sort((a, b) => a.costUsd - b.costUsd).slice(0, 10);
+        ctx.ui.notify(`Cost for ~${tokensIn} input tokens (top 10 cheapest):\n${sorted.map((x) => `${x.id}: $${x.costUsd.toFixed(5)}`).join("\n")}`, "info");
         return;
       }
       const models = await fetchModelsRaw(apiKey);
@@ -288,9 +314,14 @@ export function registerTokensCommands(pi: any): void {
       const limitArg = parts.find((p: string) => p.startsWith("--limit="))?.split("=")[1];
       const limit = limitArg ? Math.max(1, Math.min(50, Number(limitArg) || 20)) : 20;
       const cheap = parts.includes("--cheap");
+      const countOnly = parts.includes("--count");
       const pool = await fetchDynamicPool(apiKey);
       if (!pool.length) {
         ctx.ui.notify("No models returned (catalog empty or key restricted).", "warning");
+        return;
+      }
+      if (countOnly) {
+        ctx.ui.notify(`Models available: ${pool.length}`, "info");
         return;
       }
       const mapped = pool.map((m) => ({ m, price: (m.input + m.output) / 2 })).sort((a, b) => a.price - b.price).map((x) => x.m);
@@ -306,9 +337,23 @@ export function registerTokensCommands(pi: any): void {
         return;
       }
       const parts = (args ?? []).map(String);
-      const text = parts.join(" ").trim();
+      const cheapFlag = parts.includes("--cheap");
+      const textParts = parts.filter((p: string) => p !== "--cheap");
+      const text = textParts.join(" ").trim();
       if (!text) {
-        ctx.ui.notify("Usage: /tokens rank <prompt text>", "warning");
+        ctx.ui.notify("Usage: /tokens rank [--cheap] <prompt text>", "warning");
+        return;
+      }
+      if (cheapFlag) {
+        const pool = await fetchDynamicPool(apiKey);
+        if (!pool.length) {
+          ctx.ui.notify("No models returned (catalog empty or key restricted).", "warning");
+          return;
+        }
+        const sorted = pool.map((m) => ({ m, price: (m.input + m.output) / 2 })).sort((a, b) => a.price - b.price).map((x) => x.m);
+        const slice = sorted.slice(0, 10);
+        const lines = slice.map((m, i) => `${i + 1}. ${m.id}: $${m.input.toFixed(2)}/M in, $${m.output.toFixed(2)}/M out, ctx=${(m.contextWindow / 1000).toFixed(0)}K`);
+        ctx.ui.notify(`Cheapest rank:\n${lines.join("\n")}`, "info");
         return;
       }
       const ranked = await rankFromCatalog(text, apiKey, 10);
@@ -357,6 +402,21 @@ export function registerTokensCommands(pi: any): void {
       const outTokens = Math.max(256, Math.min(1024, Math.ceil(tokensIn / 2)));
       const outCost = (outTokens * (cost.output ?? 0)) / 1_000_000;
       ctx?.ui?.notify?.(`≈${model}: input≈${tokensIn} tok → $${(inCost + outCost).toFixed(5)} USD (in $${inCost.toFixed(5)} + est. out $${outCost.toFixed(5)} @ ${outTokens} tok)`, "info");
+    },
+
+    explain: async (args: any, ctx: any) => {
+      const parts = (args ?? []).map(String);
+      const text = parts.join(" ").trim();
+      if (!text) {
+        ctx?.ui?.notify?.("Usage: /tokens explain <prompt text>", "warning");
+        return;
+      }
+      const lower = text.toLowerCase();
+      const isHard = /complex|refactor|debug|implement|design|architect|security|performance|optimize/.test(lower) || lower.length > 1500;
+      const isCheap = /\[cheap\]|\bfix typo\b|\brenam|\bcomment\b/i.test(lower) || lower.length < 200;
+      const reason = isHard ? "hard (context/quality)" : isCheap ? "cheap (small edit)" : "default/balanced";
+      const model = recommendModel(text);
+      ctx?.ui?.notify?.(`Explain: ${reason} → ${model}`, "info");
     },
 
     router: async (args: any, ctx: any) => {
@@ -421,7 +481,7 @@ export function registerTokensCommands(pi: any): void {
   }
 
   pi.registerCommand("tokens", {
-    description: "Tokens.bd one-stop: /tokens (status|compare|suggest|count|history|errors|health|forecast|suggest-all|models|rank|pin|cost|router)",
+    description: "Tokens.bd one-stop: /tokens (status|compare|suggest|count|history|errors|health|forecast|suggest-all|models|rank|pin|cost|explain|router)",
     handler: tokensRootHandler,
   });
 }
