@@ -5,6 +5,13 @@
 ### Fixed
 
 - `[review]` hint now routes to the monthly reviewer model (`claude-haiku-5-5`) as documented; weekly plans fall back to the balanced pick. Previously it silently behaved as `auto`.
+- `/tokens count --model <id>` as a separate argument was silently ignored (the flag text was counted as prompt); now parsed. Unknown `--flags` are no longer treated as prompt text.
+- 429 notifier printed `wait undefineds` when `Retry-After` was absent or non-numeric.
+- Usage poller persisted a `tokens-usage` session entry every 60 s even when nothing changed; now persists only on change.
+- Dynamic suggest/rank ranked models missing from the price catalog as `$0.00`; they are now excluded from the pool.
+- Virtual router advertised `contextWindow: 1_048_576` vs `1_100_000` for the ladder virtual models; unified to `1_100_000`.
+- `/tokens explain` used a divergent regex classifier; it now reports the router's pick.
+- `/tokens pin` output now states nothing applies the pin (use `/model`).
 
 ### Removed
 

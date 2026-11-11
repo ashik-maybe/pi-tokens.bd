@@ -140,7 +140,7 @@ export function registerVirtualRouter(pi: ExtensionAPI): void {
     id: "virtual-router",
     name: "Tokens Router (budget-aware)",
     thinkingLevels: ["low", "medium", "high"],
-    contextWindow: 1_048_576,
+    contextWindow: 1_100_000,
     maxTokens: 8192,
     route(request: any, ctx: any) {
       if (request?.state?.chosen && request?.reason !== "user") {

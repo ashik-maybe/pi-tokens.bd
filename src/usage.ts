@@ -64,18 +64,34 @@ export const USAGE_ALERT_THRESHOLDS = [
 
 const usageAlertMemory = new Map<string, number>();
 
+// Poll results change slowly; persist usage entries only when the numbers
+// actually move, so a 60s poller does not bloat the session file.
+let lastUsageSignature: string | null = null;
+
+function usageSignature(usage: any): string {
+  const wallet = usage?.wallet?.balanceUsd ?? null;
+  const windows = (usage?.windows ?? [])
+    .map((w: any) => [w?.type, w?.unit, w?.limit, w?.used, w?.percentUsed, w?.resetsAt].join(":"))
+    .join("|");
+  return `${wallet}|${windows}`;
+}
+
 export async function refreshUsage(_pi: { appendEntry: (k: string, v: any) => void; events: { emit: (n: string, v: any) => void } }, ctx: any): Promise<void> {
   const apiKey = await resolveApiKey(ctx);
   if (!apiKey) return;
   const usage = await fetchUsage(apiKey);
   if (!usage) return;
   extensionState.lastUsage = usage;
-  const entry = {
-    date: new Date().toISOString(),
-    wallet: usage.wallet?.balanceUsd ?? null,
-    windows: (usage.windows ?? []).map((w: any) => ({ type: w.type, used: w.used, limit: w.limit, percentUsed: w.percentUsed, unit: w.unit })),
-  };
-  _pi.appendEntry("tokens-usage", entry);
+  const signature = usageSignature(usage);
+  if (signature !== lastUsageSignature) {
+    lastUsageSignature = signature;
+    const entry = {
+      date: new Date().toISOString(),
+      wallet: usage.wallet?.balanceUsd ?? null,
+      windows: (usage.windows ?? []).map((w: any) => ({ type: w.type, used: w.used, limit: w.limit, percentUsed: w.percentUsed, unit: w.unit })),
+    };
+    _pi.appendEntry("tokens-usage", entry);
+  }
   _pi.events.emit("tokens:usage-updated", {
     wallet: usage.wallet?.balanceUsd ?? null,
     percentUsed: usage.windows?.[0]?.percentUsed ?? 0,

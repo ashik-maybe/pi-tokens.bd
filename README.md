@@ -55,7 +55,7 @@ Headless / CI alternative:
 | `tokens.bd/fast` `coder` `reasoner` `long-context` `private` `research` | price-ordered ladders |
 | `tokens.bd/virtual-router` | opt-in, plan-aware router (below) |
 
-Provider variants share the same physical IDs. Pick `tokens.bd-responses/gpt-6-luna` or `tokens.bd-messages/claude-haiku-5-5` to use that endpoint path.
+Provider variants share the same physical IDs. Pick `tokens.bd-responses/openai/gpt-6-luna` or `tokens.bd-messages/claude-haiku-5-5` to use that endpoint path.
 
 ## Virtual router
 
@@ -72,7 +72,7 @@ Hints are positional — put them at the start of a message:
 | --- | --- |
 | `[cheap]` / `[economy]` | smallest affordable model |
 | `[balanced]` | default balanced route |
-| `[hard]` | strongest allowlisted model |
+| `[hard]` | strongest allowlisted model (monthly: GLM-5.3; weekly has no hard tier, routes to the balanced coding worker) |
 | `[review]` | reviewer-tier (monthly only) |
 
 Env overrides (set before launch):
@@ -110,14 +110,14 @@ One root: `/tokens <subcommand>`.
 | `/tokens suggest` | cheapest affordable default |
 | `/tokens suggest-all <text>` | expanded-pool rule-based pick |
 | `/tokens rank <text>` | top-10 score list with `[cheap]` / `[premium]` tags |
-| `/tokens explain <text>` | prints the classifier verdict and chosen model |
+| `/tokens explain <text>` | prints the model the router picks for the text (same rules as routing) |
 
 ### Control
 
 | Command | Does |
 | --- | --- |
 | `/tokens router status|plan|mode` | virtual-router toggles |
-| `/tokens pin <model-id> [--session]` | persist a pinned model; `--session` keeps it for the current session |
+| `/tokens pin <model-id> [--session]` | records a pinned model (nothing applies it; use `/model` to switch) |
 
 ### Diagnostics
 

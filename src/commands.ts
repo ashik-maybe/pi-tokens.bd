@@ -132,14 +132,19 @@ export function registerTokensCommands(pi: any): void {
       const parts = (args ?? []).map(String);
       let modelArg: string | undefined;
       const textParts: string[] = [];
-      for (const part of parts) {
+      for (let i = 0; i < parts.length; i += 1) {
+        const part = parts[i];
+        if (part === "--model") {
+          modelArg = parts[i + 1]?.trim();
+          i += 1;
+          continue;
+        }
         if (part.startsWith("--model=")) {
           modelArg = part.slice("--model=".length).trim();
-        } else if (part.startsWith("--model ")) {
-          modelArg = part.slice("--model ".length).trim();
-        } else {
-          textParts.push(part);
+          continue;
         }
+        if (part.startsWith("--")) continue; // unknown flags are not prompt text
+        textParts.push(part);
       }
       const text = textParts.join(" ").trim();
       if (!text) {
@@ -404,17 +409,14 @@ export function registerTokensCommands(pi: any): void {
         return;
       }
       if (sessionOnly) {
-        extensionState.sessionPinnedModel = modelId;
-        extensionState.lastPinnedModel = modelId;
-        ctx?.ui?.notify?.(`Pinned model for this session: ${modelId}. Clears when the extension reloads.`, "info");
+        ctx?.ui?.notify?.(`Pinned model noted for this session: ${modelId}. Nothing applies it automatically — switch with /model ${modelId}.`, "info");
         return;
       }
       try {
         const file = join(agentDir(), "pinned-model.json");
         mkdirSync(agentDir(), { recursive: true });
         writeFileSync(file, JSON.stringify({ model: modelId }), "utf8");
-        extensionState.lastPinnedModel = modelId;
-        ctx?.ui?.notify?.(`Pinned model saved: ${modelId}. Picks up next time you /login or /reload.`, "info");
+        ctx?.ui?.notify?.(`Pinned model saved to ${file}, but nothing applies it — switch with /model ${modelId}.`, "info");
       } catch (err) {
         ctx?.ui?.notify?.(`Pin failed: ${String(err)}`, "error");
       }
@@ -448,12 +450,7 @@ export function registerTokensCommands(pi: any): void {
         ctx?.ui?.notify?.("Usage: /tokens explain <prompt text>", "warning");
         return;
       }
-      const lower = text.toLowerCase();
-      const isHard = /complex|refactor|debug|implement|design|architect|security|performance|optimize/.test(lower) || lower.length > 1500;
-      const isCheap = /\[cheap\]|\bfix typo\b|\brenam|\bcomment\b/i.test(lower) || lower.length < 200;
-      const reason = isHard ? "hard (context/quality)" : isCheap ? "cheap (small edit)" : "default/balanced";
-      const model = recommendModel(text);
-      ctx?.ui?.notify?.(`Explain: ${reason} → ${model}`, "info");
+      ctx?.ui?.notify?.(`Explain: → ${recommendModel(text)} (routing rules in src/router.ts; TOKENS_ROUTER_MODE overrides mode, positional hints override per message)`, "info");
     },
 
     router: async (args: any, ctx: any) => {

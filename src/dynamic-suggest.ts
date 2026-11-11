@@ -16,12 +16,14 @@ export async function fetchDynamicPool(apiKey: string): Promise<CatalogModel[]> 
   const raw = await fetchModelsRaw(apiKey);
   const costs = effectiveCosts();
   const mapped = mapModels(raw, costs, PROVIDER_ID, BASE_URL);
-  return mapped.map((m: any) => ({
-    id: m.id,
-    input: Number(m.cost?.input ?? 0),
-    output: Number(m.cost?.output ?? 0),
-    contextWindow: Number(m.contextWindow ?? 128000),
-  }));
+  return mapped
+    .map((m: any) => ({
+      id: m.id,
+      input: Number(m.cost?.input ?? NaN),
+      output: Number(m.cost?.output ?? NaN),
+      contextWindow: Number(m.contextWindow ?? 128000),
+    }))
+    .filter((m: CatalogModel) => Number.isFinite(m.input) && Number.isFinite(m.output) && m.input > 0 && m.output > 0);
 }
 
 function scoreModel(m: CatalogModel, isHard: boolean, isCheap: boolean): number {

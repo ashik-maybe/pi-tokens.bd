@@ -137,7 +137,9 @@ export default function (pi: ExtensionAPI) {
       }
       if (event?.status === 429) {
         try {
-          _ctx?.ui?.notify?.(`tokens.bd 429 — wait ${retryAfterRaw}s (Retry-After). /tokens status shows windows.`, "warning");
+          const wait = extensionState.lastRetryAfterSeconds;
+          const hint = wait !== null ? `wait ${wait}s (Retry-After)` : "check /tokens status for the reset";
+          _ctx?.ui?.notify?.(`tokens.bd 429 — ${hint}.`, "warning");
         } catch {
           // swallow
         }
