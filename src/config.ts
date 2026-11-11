@@ -8,7 +8,6 @@ export const COUNT_TOKENS_URL = "https://tokens.bd/v1/messages/count_tokens";
 export const PROVIDER_ID = "tokens.bd";
 export const PROVIDER_ID_RESPONSES = "tokens.bd-responses";
 export const PROVIDER_ID_MESSAGES = "tokens.bd-messages";
-export const PROVIDER_VERSION = "0.6.0";
 
 // Roles derived from live catalog. `private` is kept as a registered alias
 // to `fast` for existing user configs; it has no reliable catalogue signal.

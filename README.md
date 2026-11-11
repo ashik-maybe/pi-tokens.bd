@@ -132,7 +132,7 @@ Deprecated shims `/tokens-status`, `/tokens-compare`, etc. still work — they w
 Source layout:
 
 - `src/index.ts` — wiring only
-- `src/catalog.ts` — live catalog, last-known costs, ladder derivation
+- `src/catalog.ts` — live catalog, costs, ladder derivation
 - `src/router.ts` — virtual router + role router
 - `src/dynamic-suggest.ts` — catalog-backed suggestion scoring
 - `src/usage.ts` — usage polling, alerts, pre-flight/compaction guards
