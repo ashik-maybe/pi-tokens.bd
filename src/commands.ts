@@ -26,6 +26,10 @@ import {
   setRouterMode,
   setRouterPlan,
 } from "./router.js";
+import {
+  fetchDynamicPool,
+  recommendFromCatalog,
+} from "./dynamic-suggest.js";
 
 export function registerTokensCommands(pi: any): void {
   const handlers = {
@@ -233,6 +237,41 @@ export function registerTokensCommands(pi: any): void {
       ctx.ui.notify(line, "info");
     },
 
+    "suggest-all": async (args: any, ctx: any) => {
+      const apiKey = await resolveApiKey(ctx);
+      if (!apiKey) {
+        ctx.ui.notify("Run /login tokens.bd first.", "warning");
+        return;
+      }
+      const parts = (args ?? []).map(String);
+      const text = parts.join(" ").trim();
+      if (!text) {
+        ctx.ui.notify("Usage: /tokens suggest-all <prompt text>", "warning");
+        return;
+      }
+      const res = await recommendFromCatalog(text, apiKey);
+      if (!res) {
+        ctx.ui.notify("No affordable models available (catalog empty or key restricted).", "warning");
+        return;
+      }
+      ctx.ui.notify(`Recommend: ${res.model} (${res.rationale})`, "info");
+    },
+
+    models: async (_args: any, ctx: any) => {
+      const apiKey = await resolveApiKey(ctx);
+      if (!apiKey) {
+        ctx.ui.notify("Run /login tokens.bd first.", "warning");
+        return;
+      }
+      const pool = await fetchDynamicPool(apiKey);
+      if (!pool.length) {
+        ctx.ui.notify("No models returned (catalog empty or key restricted).", "warning");
+        return;
+      }
+      const lines = pool.map((m) => `${m.id}: $${m.input.toFixed(2)}/M in, $${m.output.toFixed(2)}/M out, ctx=${(m.contextWindow / 1000).toFixed(0)}K`);
+      ctx.ui.notify(`Models (${pool.length}):\n${lines.slice(0, 20).join("\n")}`, "info");
+    },
+
     router: async (args: any, ctx: any) => {
       const parts = (args ?? []).map(String);
       const sub = (parts[0] ?? "status").toLowerCase();
@@ -295,7 +334,7 @@ export function registerTokensCommands(pi: any): void {
   }
 
   pi.registerCommand("tokens", {
-    description: "Tokens.bd one-stop: /tokens (status|compare|suggest|count|history|errors|health|forecast|router)",
+    description: "Tokens.bd one-stop: /tokens (status|compare|suggest|count|history|errors|health|forecast|suggest-all|models|router)",
     handler: tokensRootHandler,
   });
 }
