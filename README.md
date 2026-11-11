@@ -11,9 +11,9 @@ Live catalog pricing, role ladders, an opt-in plan-aware router, usage alerts.
 
 ## Install
 
-    pi install git:github.com/ashik-maybe/pi-tokens.bd
+    pi install npm:pi-tokens.bd
 
-(Updating later: `pi update git:github.com/ashik-maybe/pi-tokens.bd`.)
+(Updating later: `pi update npm:pi-tokens.bd`. GitHub install also works: `pi install git:github.com/ashik-maybe/pi-tokens.bd`.)
 
 First run:
 
@@ -26,7 +26,7 @@ To make a model the default, add `"defaultModel": "tokens.bd/<model-id>"` to `~/
 
 Try without installing:
 
-    pi -e git:github.com/ashik-maybe/pi-tokens.bd
+    pi -e npm:pi-tokens.bd
 
 ## Uninstall
 

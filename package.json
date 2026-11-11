@@ -7,8 +7,15 @@
   "types": "./src/index.ts",
   "license": "MIT",
   "files": [
-    "src"
+    "src",
+    "CHANGELOG.md"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ashik-maybe/pi-tokens.bd.git"
+  },
+  "homepage": "https://github.com/ashik-maybe/pi-tokens.bd",
+  "bugs": "https://github.com/ashik-maybe/pi-tokens.bd/issues",
   "keywords": [
     "pi",
     "pi-package",
@@ -19,6 +26,9 @@
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
     "@earendil-works/pi-ai": "*"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
   },
   "pi": {
     "extensions": [
