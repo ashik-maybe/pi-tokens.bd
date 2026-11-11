@@ -46,6 +46,7 @@
 - `no_upstream_available`, `model_not_priced`, `model_not_available` reclassified as non-retryable (docs: pick another model, not backoff).
 - Bare `429` without a machine-readable code now fails fast instead of being treated as retryable (could be `window_exhausted`/`model_limit_reached`).
 - Pre-flight context guard derives caps from the live catalog instead of hardcoded per-model guesses; 128k fallback when the model is unknown.
+- Removed dead exports and locals (`getLastCostSource`, `getLastCostFetchedAt`, `getRetryAfterSeconds`, `getLastCosts`, `packageRootDir`).
 - Removed duplicate module-scope shadow of `lastRequestId`; single source now feeds `/tokens-status` and `/tokens-errors`.
 - Pre-flight size guard in `before_provider_request`: estimates prompt size (chars/4) against the model's context window; notifies once per 60 s at 80%/95%; never mutates the payload.
 - Compact-overflow hint in `session_before_compact` (`reason="overflow"` only): suggests `/tokens-suggest` and `/compact`, never cancels or replaces compaction.

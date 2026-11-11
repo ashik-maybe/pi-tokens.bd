@@ -30,7 +30,6 @@ export const PREFLIGHT_COOLDOWN_MS = 60_000;
 let lastPreflightWarn = 0;
 const COMPACT_OVERFLOW_COOLDOWN_MS = 120_000;
 let lastCompactOverflowHint = 0;
-let lastRequestIdLastSnapshot: string | null = null;
 
 // Catalog-derived context cap: exact alias match first, then substring.
 // Falls back to 128k when the live catalog has nothing for this model.

@@ -1,6 +1,5 @@
 import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import type {
   Credential,
   OAuthCredential,
@@ -49,14 +48,6 @@ export function extractApiKey(credential: Credential | undefined): string | unde
 // the one Pi is actually using.
 export function agentDir(): string {
   return join(process.env.HOME ?? "", ".pi", "agent");
-}
-
-export function packageRootDir(): string {
-  try {
-    return join(dirname(fileURLToPath(import.meta.url)), "..");
-  } catch {
-    return process.cwd();
-  }
 }
 
 export function readJson(path: string): any {

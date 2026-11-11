@@ -17,12 +17,10 @@ import {
 } from "./config.js";
 import {
   agentDir,
-  packageRootDir,
   readJson,
   num,
   extractApiKey,
 } from "./utils.js";
-import { extensionState } from "./state.js";
 
 interface CostEntry {
   input: number;
@@ -48,8 +46,6 @@ export const ALL_ROLES = ["fast", "coder", "reasoner", "long-context", "private"
 // ladder roles dynamically at route time instead of from a file.
 let lastCatalog: CatalogModel[] = [];
 let lastCosts: Record<string, CostEntry> = {};
-let lastCostSource = "none";
-let lastCostFetchedAt: Date | null = null;
 
 function cachePriceField(pricing: any, key: string): number {
   const variants = [
@@ -247,28 +243,15 @@ export async function fetchNativeModels(context: RefreshModelsContext, provider:
   if (catalog.length) {
     lastCatalog = catalog;
     lastCosts = buildCosts(catalog);
-    lastCostSource = "tokens.bd/api/models";
-    lastCostFetchedAt = new Date();
   } else {
     lastCatalog = [];
     lastCosts = {};
-    lastCostSource = "offline (dynamic-only)";
-    lastCostFetchedAt = null;
   }
   const baseUrl = providerApiAndBaseUrl(provider).baseUrl;
   return mapModels(live, lastCosts, provider, baseUrl);
 }
 
-export function getRetryAfterSeconds(): number | null {
-  // Commands should not read mutable extensionState directly to avoid coupling.
-  // The retry hint stays inside usage.ts / state.ts; if not yet wired, return null.
-  return extensionState.lastRetryAfterSeconds;
-}
-
 export function getLastCatalog(): CatalogModel[] { return lastCatalog; }
-export function getLastCosts(): Record<string, CostEntry> { return lastCosts; }
-export function getLastCostSource(): string { return lastCostSource; }
-export function getLastCostFetchedAt(): Date | null { return lastCostFetchedAt; }
 export function effectiveCosts(): Record<string, CostEntry> {
   return lastCosts;
 }
