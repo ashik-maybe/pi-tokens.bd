@@ -176,8 +176,7 @@ export function mapModels(
     const cost = costs[id] ?? {};
     const input = num(cost.input, 0);
     const output = num(cost.output, 0);
-    // tokens.bd bills unknown cache prices at the input price
-    // (api-reference cost formula). costs.json stores 0 for "unknown".
+    // tokens.bd bills unknown cache prices at the input price (API reference).
     const cacheRead = cost.cacheRead ? num(cost.cacheRead, input) : input;
     const cacheWrite = cost.cacheWrite ? num(cost.cacheWrite, input) : input;
     const reasoning =
