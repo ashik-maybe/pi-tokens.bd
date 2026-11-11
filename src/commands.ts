@@ -14,6 +14,7 @@ import {
 import {
   fetchUsage,
   formatWindow,
+  projectedMonthlySpend,
 } from "./usage.js";
 import { extensionState } from "./state.js";
 import { ERROR_MAP } from "./errors.js";
@@ -21,6 +22,7 @@ import { COUNT_TOKENS_URL } from "./config.js";
 import {
   getRouterMode,
   getRouterPlan,
+  recommendModel,
   setRouterMode,
   setRouterPlan,
 } from "./router.js";
@@ -59,6 +61,52 @@ export function registerTokensCommands(pi: any): void {
     errors: async (_args: any, ctx: any) => {
       const lines = Object.entries(ERROR_MAP).map(([code, msg]) => `${code}: ${msg}`);
       if (extensionState.lastRequestId) lines.unshift(`Last request id: ${extensionState.lastRequestId}`);
+      ctx.ui.notify(lines.join("\n"), "info");
+    },
+
+    health: async (_args: any, ctx: any) => {
+      const apiKey = await resolveApiKey(ctx);
+      if (!apiKey) {
+        ctx.ui.notify("Run /login tokens.bd first.", "warning");
+        return;
+      }
+      const models = await fetchModelsRaw(apiKey);
+      if (!models.length) {
+        ctx.ui.notify("Health: live catalog fetch failed (offline or auth).", "error");
+        return;
+      }
+      const costs = effectiveCosts();
+      const lines = models.map((m: any) => {
+        const c: any = costs[m.id];
+        const costStr = c ? `in=${c.input}/M out=${c.output}/M` : "(no cost)";
+        const ctxStr = c?.contextWindow ? `ctx=${c.contextWindow}` : "";
+        return `${m.id}: ${costStr} ${ctxStr}`;
+      });
+      ctx.ui.notify(`tokens.bd: ${models.length} models via live catalog. ${lines.slice(0, 30).join(", ")}`, "info");
+    },
+
+    forecast: async (_args: any, ctx: any) => {
+      const apiKey = await resolveApiKey(ctx);
+      if (!apiKey) {
+        ctx.ui.notify("Run /login tokens.bd first.", "warning");
+        return;
+      }
+      const usage = await fetchUsage(apiKey);
+      if (!usage) {
+        ctx.ui.notify("Failed to fetch usage.", "error");
+        return;
+      }
+      extensionState.lastUsage = usage;
+      const lines: string[] = [];
+      if (usage.plan) {
+        lines.push(`Plan: ${usage.plan.name} (${usage.plan.tier})`);
+        if (usage.plan.periodEnd) lines.push(`Period ends: ${usage.plan.periodEnd}`);
+      } else {
+        lines.push("Plan: pay-as-you-go");
+      }
+      for (const w of usage.windows ?? []) lines.push(formatWindow(w));
+      if (usage.wallet && usage.wallet.balanceUsd !== null) lines.push(`Wallet: $${usage.wallet.balanceUsd.toFixed(2)} USD (BDT balance shown on dashboard only)`);
+      lines.push(`Projected monthly spend: $${projectedMonthlySpend(usage).toFixed(2)} USD`);
       ctx.ui.notify(lines.join("\n"), "info");
     },
 
@@ -119,6 +167,14 @@ export function registerTokensCommands(pi: any): void {
         }
         const inputTokens = Number(raw?.input_tokens ?? 0);
         ctx.ui.notify(`${model}: input_tokens=${inputTokens} (not billed)`, "info");
+        const costEntry: any = effectiveCosts()[model];
+        const inPrice = Number(costEntry?.input ?? 0);
+        const outPrice = Number(costEntry?.output ?? 0);
+        const estInputCostUsd = (inputTokens * inPrice) / 1_000_000;
+        const outTokens = Math.max(256, Math.min(1024, Math.ceil(inputTokens / 2)));
+        const estOutputCostUsd = (outTokens * outPrice) / 1_000_000;
+        const estTotalCostUsd = estInputCostUsd + estOutputCostUsd;
+        ctx.ui.notify(`Est. cost: $${estTotalCostUsd.toFixed(5)} USD (input $${estInputCostUsd.toFixed(5)} + est. out $${estOutputCostUsd.toFixed(5)} @ ${outTokens} tok)`, "info");
       } catch (err) {
         ctx.ui.notify(`count failed: ${(err as Error).message || "(network)"}`, "error");
       }
@@ -159,7 +215,7 @@ export function registerTokensCommands(pi: any): void {
       ctx.ui.notify(lines.join("\n"), "info");
     },
 
-    suggest: async (_args: any, ctx: any) => {
+    suggest: async (args: any, ctx: any) => {
       const costs = effectiveCosts();
       const entries = Object.entries(costs);
       if (entries.length === 0) {
@@ -167,7 +223,14 @@ export function registerTokensCommands(pi: any): void {
         return;
       }
       const cheapest = entries.sort((a: any, b: any) => a[1].input + a[1].output - (b[1].input + b[1].output))[0];
-      ctx.ui.notify(`Cheapest: ${cheapest[0]} ($${cheapest[1].input}/M in, $${cheapest[1].output}/M out)`, "info");
+      let line = `Cheapest: ${cheapest[0]} ($${cheapest[1].input}/M in, $${cheapest[1].output}/M out)`;
+      const parts = (args ?? []).map(String);
+      const text = parts.join(" ").trim();
+      if (text) {
+        const recommended = recommendModel(text);
+        line += ` | Recommended: ${recommended}`;
+      }
+      ctx.ui.notify(line, "info");
     },
 
     router: async (args: any, ctx: any) => {
@@ -232,7 +295,7 @@ export function registerTokensCommands(pi: any): void {
   }
 
   pi.registerCommand("tokens", {
-    description: "Tokens.bd one-stop: /tokens (status|compare|suggest|count|history|errors|router)",
+    description: "Tokens.bd one-stop: /tokens (status|compare|suggest|count|history|errors|health|forecast|router)",
     handler: tokensRootHandler,
   });
 }

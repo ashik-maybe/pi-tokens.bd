@@ -2,5 +2,5 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 node_modules/.bin/tsc --noEmit
-PI="$HOME/.local/share/mise/installs/pi/1.5.1/pi/pi"
+PI=$(command -v pi || echo "$HOME/.local/share/mise/installs/pi/latest/pi/pi")
 "$PI" --offline -e "$(pwd)/src/index.ts" --list-models >/dev/null 2>&1

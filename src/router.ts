@@ -87,6 +87,14 @@ function stripHint(text: string): string {
   return text.replace(HINT_RE, "").trimStart();
 }
 
+// User-facing recommendation entry: classify the current prompt and pick the
+// allowlisted model for the active plan/mode. Pure text-in, model-out.
+export function recommendModel(text: string): string {
+  const plan = getRouterPlan();
+  const mode = getRouterMode();
+  return routeModel(plan, mode, text);
+}
+
 export function routeModel(plan: RouterPlan, mode: RouterMode, text: string): string {
   const t = stripHint(text || "").toLowerCase();
   const hint = HINT_RE.exec(text || "");

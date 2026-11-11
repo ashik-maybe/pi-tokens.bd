@@ -135,6 +135,22 @@ export function formatWindow(w: any): string {
   return `${label}: ${remaining} remaining of ${limit}${unit ? ` ${unit}` : ""} (${percent}%, used ${used}, resets in ${timeLeft})`;
 }
 
+// Project a monthly spend figure for the current plan window. For a weekly
+// window we assume the observed spend repeats weekly; for a monthly window the
+// observed usage is already the monthly figure.
+export function projectedMonthlySpend(usage: any): number {
+  let projected = 0;
+  for (const w of usage?.windows ?? []) {
+    const limit = Number(w?.limit ?? 0);
+    const percent = Number(w?.percentUsed ?? 0);
+    if (!Number.isFinite(limit) || !Number.isFinite(percent) || limit <= 0) continue;
+    const spent = (limit * percent) / 100;
+    const monthly = w?.type === "weekly" ? (spent * 30) / 7 : spent;
+    projected = Math.max(projected, monthly);
+  }
+  return projected;
+}
+
 export function createBeforeProviderRequestHandler(piApi: any) {
   return async (event: any, ctx: any) => {
     try {
