@@ -40,7 +40,6 @@ const HINTS: Record<string, RouterMode> = {
   "[economy]": "economy",
   "[balanced]": "auto",
   "[hard]": "hard",
-  "[review]": "auto",
 };
 
 export function setRouterPlan(plan: RouterPlan): void {
