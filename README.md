@@ -43,7 +43,7 @@ Headless / CI alternative:
 - **Live catalog only.** Pricing and model names are fetched from `https://tokens.bd/api/models` on every launch. Offline, price-aware commands report an empty catalog.
 - **Role ladders.** `fast`, `coder`, `reasoner`, `long-context`, `private`, `research` pick the cheapest available model per role and step down on quota/5xx errors. `auto` is an alias to `fast`.
 - **Virtual router.** `tokens.bd/virtual-router` is an opt-in, plan-aware assistant. It picks one allowlisted model per task from the current plan and sticks to it on continuations. No plan switching. No premium fallback.
-- **Usage alerts.** 75 / 90 / 100% window-count warnings and a low-wallet alert below $1.
+- **Usage alerts.** 75 / 90 / 100% window-count warnings.
 - **Error mapping.** Quota/5xx step down ladder; auth, billing, and input errors fail fast.
 - **Dynamic catalog helpers.** Price/context-aware suggestions and ranking from your key’s available model set.
 
@@ -147,7 +147,7 @@ Verify before committing:
 
 ## Known limits
 
-- The live catalog is the sole source of truth. If it fails or the key’s model list is empty, price-aware commands print `No costs loaded`/empty results and the ladder/default picks may be empty.
+- The live catalog is the sole source of truth. If it fails or the key’s model list is empty, price-aware commands print `No costs loaded`/empty results and the ladder/default picks may be empty. Prices come from `https://tokens.bd/api/models`, which is not part of the documented API surface; `GET /v1/models` lists callable ids without prices. If the feed becomes unavailable, there is no price source.
 - Recommendations are rule-based; they do not call models and are not latency or quality guarantees.
 - `virtual-router` only switch plans via explicit user action and never hands you a premium model by default.
 - Tokens.bd does not expose BDT balances/exchange rates; `/tokens status` prints USD only.

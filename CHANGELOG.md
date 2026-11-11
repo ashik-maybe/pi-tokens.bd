@@ -9,7 +9,7 @@
 
 ### Added
 
-- Typed error classifier parses `error.code` (OpenAI shape) and Anthropic-shaped `code` instead of substring guessing; new `free_limit_reached` mapped; `model_limit_reached` moved to fail-fast.
+- Typed error classifier parses `error.code` (OpenAI shape) and Anthropic-shaped `code` instead of substring guessing; `model_limit_reached` moved to fail-fast.
 - `/tokens-count` via `POST /v1/messages/count_tokens` (not billed) — estimate input size before sizing `max_tokens` or compacting.
 - `/tokens-status` shows per-window `remaining`, `percentUsed`, `resetsAt` in human terms; BDT balance stays dashboard-only.
 - Early-warning usage alerts at 75/90/100% per window per reset (once per threshold).
@@ -18,7 +18,7 @@
 - Tolerant live catalog cache-read/write pricing: cache fields read if present, else billed at input price as before.
 - `/tokens-compare` shows cache column; flags always-on thinking models (K3/GLM-5.3).
 - `ROLE_THINKING_LEVELS` extended (`xhigh`, `max`); effort superset documented as provider-dependent.
-- `/tokens compare` prints `Source: <live|bundled>` so readers see whether prices came from live fetch or bundled fallback (no separate `/tokens-costs` command).
+- Forecast projects monthly spend from USD-unit windows only (`/v1/tokens/usage` may report `requests`-unit windows, which carry no price; `session_5h` windows have no monthly projection).
 - Consolidated six `tokens-*` commands into one `/tokens <mode>` root (`status|compare|suggest|count|history|errors`); legacy `/tokens-*` names are deprecated shims calling through with once-per-session notice.
 - Added experimental optional `tokens.bd/virtual-router` virtual model (opt-in; picks an allowlisted weekly/monthly model per request; sticky on continuations/retries; never auto-switches plans or slabs to premium). Commands: `/tokens router status|plan|mode`.
 - Added `/tokens health` — fetches live model catalog and prints counts and costs/context per model.
@@ -40,6 +40,9 @@
 
 ### Changed
 
+- Forecast projects monthly spend from USD-unit `weekly`/`monthly` windows only; `requests`-unit windows carry no price, `session_5h` windows have no monthly equivalent. Reports `n/a` when nothing qualifies.
+- Wallet stored as `null` (not `0`) when the account has no wallet; `history` prints `n/a` and the graph skips missing points instead of charting `$0`.
+- Dropped non-documented `free_limit_reached` code from the error classifier (docs define `window_exhausted`/`model_limit_reached`).
 - Removed duplicate module-scope shadow of `lastRequestId`; single source now feeds `/tokens-status` and `/tokens-errors`.
 - Pre-flight size guard in `before_provider_request`: estimates prompt size (chars/4) against the model's context window; notifies once per 60 s at 80%/95%; never mutates the payload.
 - Compact-overflow hint in `session_before_compact` (`reason="overflow"` only): suggests `/tokens-suggest` and `/compact`, never cancels or replaces compaction.
@@ -48,6 +51,7 @@
 
 - README gains provider-variant notes, one-key-per-customer guidance, migration cheatsheet, BDT note.
 - README overhaul — install/upgrade/uninstall, requirements, features, virtual models table, virtual-router hints, consolidated command reference (usage/catalog/recommend/control/diagnostics), dev lanes, known limits trimmed to essentials, dynamic-only catalog pass (no bundled fallback) applied.
+- README corrected: removed non-existent low-wallet alert claim; known limits now state catalog prices come from the undocumented `/api/models` feed and that `/v1/models` carries no prices.
 - SKILL.md gains count/retry guidance for cached/reasoning sessions and Windows key-export reminder.
 
 ## [0.5.0] - 2026-11-10
