@@ -159,6 +159,9 @@ export function createBeforeProviderRequestHandler(piApi: any) {
       const chars = JSON.stringify(payload).length;
       const approxTokens = roughPromptTokens(payload);
       const hint = String(payload.model ?? ctx?.model?.id ?? "").toLowerCase();
+      if (hint) {
+        extensionState.modelUsage[hint] = (extensionState.modelUsage[hint] ?? 0) + 1;
+      }
       const piCtx = Number(ctx?.model?.contextWindow ?? 0);
       const cap = piCtx > 8192 ? piCtx : guessContextCap(hint);
       const strict = cap * PREFLIGHT_STRICT_AT;

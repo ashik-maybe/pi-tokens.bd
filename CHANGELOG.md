@@ -27,7 +27,9 @@
 - Extended `/tokens forecast` with `--block=<usd>` to print a soft cap latch when projection exceeds the threshold.
 - Extended `/tokens models` with `--cheap` (cheapest-first), `--limit N`, and `--count`.
 - Extended `/tokens compare` with `--compare-with <text>` to print the 10 cheapest models for that input size.
-- Extended `/tokens rank` with `--cheap` to print the 10 cheapest models as a ranked list.
+- Ranked output now tags models as `cheap` vs `premium` (input price threshold crossed at $2/M).
+- Added `/tokens history --by-model` — per-model usage count histogram from session entries.
+- Extended `/tokens pin` with `--session` to pin only for the current session (not persisted to disk).
 - Added `/tokens history --graph` — ASCII sparkline of wallet history derived from session usage entries.
 - `/tokens-plan` claim removed (never registered).
 

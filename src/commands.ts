@@ -197,6 +197,17 @@ export function registerTokensCommands(pi: any): void {
 
     history: async (args: any, ctx: any) => {
       const parts = (args ?? []).map(String);
+      const byModel = parts.includes("--by-model");
+      if (byModel) {
+        const entries = Object.entries(extensionState.modelUsage).sort((a, b) => b[1] - a[1]);
+        if (!entries.length) {
+          ctx?.ui?.notify?.("No model usage recorded this session.", "info");
+          return;
+        }
+        const lines = entries.slice(0, 10).map(([model, count]) => `${model}: ${count} call(s)`);
+        ctx?.ui?.notify?.("Model usage (session): \n" + lines.join("\n"), "info");
+        return;
+      }
       const wantsGraph = parts.includes("--graph") || parts.includes("--history-graph");
       const branch = ctx.sessionManager.getBranch();
       const entries = branch.filter((e: any) => e.type === "custom" && e.customType === "tokens-usage");
@@ -352,7 +363,10 @@ export function registerTokensCommands(pi: any): void {
         }
         const sorted = pool.map((m) => ({ m, price: (m.input + m.output) / 2 })).sort((a, b) => a.price - b.price).map((x) => x.m);
         const slice = sorted.slice(0, 10);
-        const lines = slice.map((m, i) => `${i + 1}. ${m.id}: $${m.input.toFixed(2)}/M in, $${m.output.toFixed(2)}/M out, ctx=${(m.contextWindow / 1000).toFixed(0)}K`);
+        const lines = slice.map((m, i) => {
+          const marker = m.input < 2.0 ? "cheap" : "premium";
+          return `${i + 1}. [${marker}] ${m.id}: $${m.input.toFixed(2)}/M in, $${m.output.toFixed(2)}/M out, ctx=${(m.contextWindow / 1000).toFixed(0)}K`;
+        });
         ctx.ui.notify(`Cheapest rank:\n${lines.join("\n")}`, "info");
         return;
       }
@@ -361,15 +375,25 @@ export function registerTokensCommands(pi: any): void {
         ctx.ui.notify("No models returned (catalog empty or key restricted).", "warning");
         return;
       }
-      const lines = ranked.map((m, i) => `${i + 1}. ${m.id}: $${m.input.toFixed(2)}/M in, $${m.output.toFixed(2)}/M out, ctx=${(m.contextWindow / 1000).toFixed(0)}K`);
+      const lines = ranked.map((m, i) => {
+        const marker = m.input < 2.0 ? "cheap" : "premium";
+        return `${i + 1}. [${marker}] ${m.id}: $${m.input.toFixed(2)}/M in, $${m.output.toFixed(2)}/M out, ctx=${(m.contextWindow / 1000).toFixed(0)}K`;
+      });
       ctx.ui.notify(`Ranked:\n${lines.join("\n")}`, "info");
     },
 
     pin: async (args: any, ctx: any) => {
       const parts = (args ?? []).map(String);
-      const modelId = parts[0];
+      const sessionOnly = parts.includes("--session") || parts.includes("--only");
+      const modelId = parts.find((p: string) => !p.startsWith("--"));
       if (!modelId) {
-        ctx?.ui?.notify?.("Usage: /tokens pin <model-id>", "warning");
+        ctx?.ui?.notify?.("Usage: /tokens pin <model-id> [--session]", "warning");
+        return;
+      }
+      if (sessionOnly) {
+        extensionState.sessionPinnedModel = modelId;
+        extensionState.lastPinnedModel = modelId;
+        ctx?.ui?.notify?.(`Pinned model for this session: ${modelId}. Clears when the extension reloads.`, "info");
         return;
       }
       try {
