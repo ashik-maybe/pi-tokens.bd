@@ -93,7 +93,10 @@ export function routeModel(plan: RouterPlan, mode: RouterMode, text: string): st
   const t = stripHint(text || "").toLowerCase();
   const hint = HINT_RE.exec(text || "");
   if (hint) {
-    mode = (HINTS[`[${hint[1].toLowerCase()}]`] as RouterMode) ?? mode;
+    const word = hint[1].toLowerCase();
+    // [review] pins the monthly reviewer; weekly has no reviewer tier.
+    if (word === "review") return plan === "monthly" ? MONTHLY.reviewer : WEEKLY.balanced;
+    mode = (HINTS[`[${word}]`] as RouterMode) ?? mode;
   }
   if (mode === "economy") {
     return plan === "weekly" ? WEEKLY.economy : MONTHLY.cheap;

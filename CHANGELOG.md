@@ -2,6 +2,10 @@
 
 ## [0.6.0] - 2026-11-11
 
+### Fixed
+
+- `[review]` hint now routes to the monthly reviewer model (`claude-haiku-5-5`) as documented; weekly plans fall back to the balanced pick. Previously it silently behaved as `auto`.
+
 ### Removed
 
 - Bundled `costs.json` is dropped. The live `/api/models` catalogue is the sole source of truth. Offline/empty catalogue returns empty costs; price-aware commands print "No costs loaded"/empty results.
