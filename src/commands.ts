@@ -3,7 +3,11 @@
 
 import {
   resolveApiKey,
+  agentDir,
+  readJson,
 } from "./utils.js";
+import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   fetchModelsRaw,
   effectiveCosts,
@@ -185,18 +189,34 @@ export function registerTokensCommands(pi: any): void {
       }
     },
 
-    history: async (_args: any, ctx: any) => {
+    history: async (args: any, ctx: any) => {
+      const parts = (args ?? []).map(String);
+      const wantsGraph = parts.includes("--graph") || parts.includes("--history-graph");
       const branch = ctx.sessionManager.getBranch();
       const entries = branch.filter((e: any) => e.type === "custom" && e.customType === "tokens-usage");
       if (entries.length === 0) {
         ctx.ui.notify("No usage history in this session yet.", "info");
         return;
       }
-      const lines = entries.slice(-7).map((e: any) => {
+      const rows = entries.slice(-7);
+      const lines = rows.map((e: any) => {
         const d = new Date(e.data.date).toLocaleDateString();
         const w = e.data.windows?.[0];
         return `${d}: $${e.data.wallet?.toFixed(2) ?? "?"} | ${w ? `${w.percentUsed}%` : "n/a"}`;
       });
+      if (wantsGraph) {
+        const samples = rows.map((e: any) => Number(e.data.wallet ?? 0));
+        const max = Math.max(...samples, 1);
+        const bars = samples.map((s: number) => {
+          const blocks = Math.round((s / max) * 16);
+          return "█".repeat(Math.max(1, blocks));
+        });
+        lines.push("--- graph ---");
+        for (let i = 0; i < rows.length; i += 1) {
+          const d = new Date(rows[i].data.date).toLocaleDateString();
+          lines.push(`${d} ${bars[i]} $${samples[i].toFixed(2)}`);
+        }
+      }
       ctx.ui.notify(lines.join("\n"), "info");
     },
 
@@ -258,19 +278,25 @@ export function registerTokensCommands(pi: any): void {
       ctx.ui.notify(`Recommend: ${res.model} (${res.rationale})`, "info");
     },
 
-    models: async (_args: any, ctx: any) => {
+    models: async (args: any, ctx: any) => {
       const apiKey = await resolveApiKey(ctx);
       if (!apiKey) {
         ctx.ui.notify("Run /login tokens.bd first.", "warning");
         return;
       }
+      const parts = (args ?? []).map(String);
+      const limitArg = parts.find((p: string) => p.startsWith("--limit="))?.split("=")[1];
+      const limit = limitArg ? Math.max(1, Math.min(50, Number(limitArg) || 20)) : 20;
+      const cheap = parts.includes("--cheap");
       const pool = await fetchDynamicPool(apiKey);
       if (!pool.length) {
         ctx.ui.notify("No models returned (catalog empty or key restricted).", "warning");
         return;
       }
-      const lines = pool.map((m) => `${m.id}: $${m.input.toFixed(2)}/M in, $${m.output.toFixed(2)}/M out, ctx=${(m.contextWindow / 1000).toFixed(0)}K`);
-      ctx.ui.notify(`Models (${pool.length}):\n${lines.slice(0, 20).join("\n")}`, "info");
+      const mapped = pool.map((m) => ({ m, price: (m.input + m.output) / 2 })).sort((a, b) => a.price - b.price).map((x) => x.m);
+      const slice = cheap ? mapped.slice(0, limit) : pool.slice(0, limit);
+      const lines = slice.map((m) => `${m.id}: $${m.input.toFixed(2)}/M in, $${m.output.toFixed(2)}/M out, ctx=${(m.contextWindow / 1000).toFixed(0)}K`);
+      ctx.ui.notify(`Models (${pool.length}):\n${lines.join("\n")}`, "info");
     },
 
     rank: async (args: any, ctx: any) => {
@@ -292,6 +318,45 @@ export function registerTokensCommands(pi: any): void {
       }
       const lines = ranked.map((m, i) => `${i + 1}. ${m.id}: $${m.input.toFixed(2)}/M in, $${m.output.toFixed(2)}/M out, ctx=${(m.contextWindow / 1000).toFixed(0)}K`);
       ctx.ui.notify(`Ranked:\n${lines.join("\n")}`, "info");
+    },
+
+    pin: async (args: any, ctx: any) => {
+      const parts = (args ?? []).map(String);
+      const modelId = parts[0];
+      if (!modelId) {
+        ctx?.ui?.notify?.("Usage: /tokens pin <model-id>", "warning");
+        return;
+      }
+      try {
+        const file = join(agentDir(), "pinned-model.json");
+        mkdirSync(agentDir(), { recursive: true });
+        writeFileSync(file, JSON.stringify({ model: modelId }), "utf8");
+        extensionState.lastPinnedModel = modelId;
+        ctx?.ui?.notify?.(`Pinned model saved: ${modelId}. Picks up next time you /login or /reload.`, "info");
+      } catch (err) {
+        ctx?.ui?.notify?.(`Pin failed: ${String(err)}`, "error");
+      }
+    },
+
+    cost: async (args: any, ctx: any) => {
+      const parts = (args ?? []).map(String);
+      const text = parts.join(" ").trim();
+      if (!text) {
+        ctx?.ui?.notify?.("Usage: /tokens cost <prompt text>", "warning");
+        return;
+      }
+      const entries = Object.entries(effectiveCosts());
+      if (!entries.length) {
+        ctx?.ui?.notify?.("No costs loaded.", "warning");
+        return;
+      }
+      const tokensIn = Math.ceil(text.length / 4);
+      const cheapest = entries.sort((a, b) => a[1].input + a[1].output - (b[1].input + b[1].output))[0];
+      const [model, cost] = cheapest;
+      const inCost = (tokensIn * (cost.input ?? 0)) / 1_000_000;
+      const outTokens = Math.max(256, Math.min(1024, Math.ceil(tokensIn / 2)));
+      const outCost = (outTokens * (cost.output ?? 0)) / 1_000_000;
+      ctx?.ui?.notify?.(`≈${model}: input≈${tokensIn} tok → $${(inCost + outCost).toFixed(5)} USD (in $${inCost.toFixed(5)} + est. out $${outCost.toFixed(5)} @ ${outTokens} tok)`, "info");
     },
 
     router: async (args: any, ctx: any) => {
@@ -356,7 +421,7 @@ export function registerTokensCommands(pi: any): void {
   }
 
   pi.registerCommand("tokens", {
-    description: "Tokens.bd one-stop: /tokens (status|compare|suggest|count|history|errors|health|forecast|suggest-all|models|rank|router)",
+    description: "Tokens.bd one-stop: /tokens (status|compare|suggest|count|history|errors|health|forecast|suggest-all|models|rank|pin|cost|router)",
     handler: tokensRootHandler,
   });
 }

@@ -15,6 +15,15 @@
 - `ROLE_THINKING_LEVELS` extended (`xhigh`, `max`); effort superset documented as provider-dependent.
 - `/tokens compare` prints `Source: <live|bundled>` so readers see whether prices came from live fetch or bundled fallback (no separate `/tokens-costs` command).
 - Consolidated six `tokens-*` commands into one `/tokens <mode>` root (`status|compare|suggest|count|history|errors`); legacy `/tokens-*` names are deprecated shims calling through with once-per-session notice.
+- Added experimental optional `tokens.bd/virtual-router` virtual model (opt-in; picks an allowlisted weekly/monthly model per request; sticky on continuations/retries; never auto-switches plans or slabs to premium). Commands: `/tokens router status|plan|mode`.
+- Added `/tokens health` — fetches live model catalog and prints counts and costs/context per model.
+- Added `/tokens forecast` — projects monthly spend from current window usage and prints wallet USD; usage stays local to the session entry.
+- Added `/tokens suggest-all <text>` — expanded pool: picks cheapest affordable model for the prompt using price/context scoring; rule-based, no LLM classifier.
+- Added `/tokens models [--cheap] [--limit N]` — lists models with prices; `--cheap` sorts cheapest-first and `--limit` trims output.
+- Added `/tokens rank <text>` — top-10 ranked list for the prompt by price/context score.
+- Added `/tokens cost <text>` and `/tokens cost --estimate <text>` — cost estimate using cheapest affordable model; no network call for the text path.
+- Added `/tokens pin <model-id>` — writes a pinned model to `~/.pi/agent/pinned-model.json`; not auto-applied.
+- Added `/tokens history --graph` — ASCII sparkline of wallet history derived from session usage entries.
 - `/tokens-plan` claim removed (never registered).
 
 ### Changed
