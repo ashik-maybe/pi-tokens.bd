@@ -216,13 +216,6 @@ function storedFallback(context: RefreshModelsContext): any[] {
   return [];
 }
 
-// Dynamic-only policy: no bundled fallback.
-// The live /api/models catalogue is the single source of truth for prices and
-// context windows. Offline/empty catalogue returns an empty object.
-export function loadFallbackCosts(): Record<string, CostEntry> {
-  return {};
-}
-
 export async function fetchModelsRaw(apiKey: string, signal?: AbortSignal): Promise<any[]> {
   try {
     const res = await fetch(MODELS_URL, {
