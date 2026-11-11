@@ -13,7 +13,7 @@ Live catalog pricing, role ladders, an opt-in plan-aware router, usage alerts.
 
     pi install git:github.com/ashik-maybe/pi-tokens.bd
 
-(Updating later: `pi update git:github.com/ashik-maybe/pi-tokens.bd`. Requires repo access, e.g. an SSH key registered on your GitHub account.)
+(Updating later: `pi update git:github.com/ashik-maybe/pi-tokens.bd`.)
 
 First run:
 
